@@ -1,0 +1,702 @@
+/******************************************
+ 这个程序被用于：
+ (1)控制移动机械臂每一个关节（包括移动平台与机械臂）的运动，
+ 
+ (2)向上位机发送机器人的运动状态、每个关节的运动速度、位置
+ ******************************************/
+
+#include<unistd.h>
+#include<iostream>
+#include "general_6s.h"
+
+
+using namespace Eigen;
+using namespace std;
+
+#define velocity_mode 0
+#define position_mode 1
+#define PI 3.1415926
+
+// 定义机器人类
+extern General_6S* g_general_6s;
+extern void start_ecm(int argc, char* argv[]);
+extern void loop_display();
+
+/*全局变量*/
+//     驱动轮减速比            换向电机减速比          升降电机减速比
+double gear_ratio_drive = 32.352, gear_ratio_direc = 141.67, gear_ratio_lift = 1.0, gear_ratio_arm = 101.0 * 4.0;
+double value_encoder = 131072; //编码器（17位）一圈的脉冲数, 所有编码器的维数均是17 bit
+double radius_wheel = 0.075; //驱动轮半径
+double wheel_separation_ = 0.441; //两驱动轮轴距
+
+// 零点状态下各关节位置（脉冲），由于servo 1&3位CSV模式，故1&3伺服的位置不允许访问，用于与伺服进行通讯时的零点参考
+int encoder_zero_position[11] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+// 存储零点状态9个位控关节的位置（弧度），
+VectorXd zero_cfg(9);
+// 存储准备状态各个关节的位置（弧度）
+VectorXd ready_cfg(9);
+// 存储打包状态各个关节的位置（弧度）
+VectorXd package_cfg(9);
+//用于存储当前的构型
+VectorXd current_cfg(9);
+VectorXd velCurrent(9);
+VectorXd accCurrent(9);
+double Ts = 0.0001;
+double velPerc = 5, accPerc = 3, decPerc = 3;
+std::deque<double> trajectory_joint;
+
+int arm_mode = position_mode;
+
+int in;
+
+/**********************************************************************/
+/********************控制器与伺服进行进行通讯的函数********************/
+/**********************************************************************/
+// 向第index个伺服的对象字典adrr发送数据value
+bool set_xx(int adrr, int index, double value) {
+	if (adrr == 0x60ff) {
+		Pdo_value set_csv_vel;
+		if (index == 1) { //轮子转动的线速度
+			set_csv_vel.int_value = -int(
+					value / radius_wheel / PI / 2 * gear_ratio_drive
+							* value_encoder);
+		} else if (index == 3) { //轮子转动的线速度
+			set_csv_vel.int_value = int(
+					value / radius_wheel / PI / 2 * gear_ratio_drive
+							* value_encoder);
+		} else if (arm_mode == velocity_mode) {
+			if (index == 2) { //升降台的速度m/s。升降台上下5mm，电机转动一圈(131072个脉冲)
+				set_csv_vel.int_value = int(
+						value * 1000 / 5 * gear_ratio_lift * value_encoder);
+			} else if (index >= 5) { //机械臂6个关节的转动速度，rad/s
+				if (index == 7) {
+					set_csv_vel.int_value = int(
+							value / PI / 2 * gear_ratio_arm
+									* value_encoder);
+				} else {
+					set_csv_vel.int_value = -int(
+							value / PI / 2 * gear_ratio_arm
+									* value_encoder);
+				}
+			}
+		}
+		g_general_6s->set_pdo_value(0x60ff, index, set_csv_vel);
+	} else if (adrr == 0x607a) {
+		Pdo_value set_csp_pos;
+		if (index == 0 || index == 4) { //右换向轮的角度
+			set_csp_pos.int_value = int(
+					value / PI / 2 * gear_ratio_direc * value_encoder)
+					+ encoder_zero_position[index];
+		} else if (arm_mode == position_mode) {
+			//cout<<"position_mode"<<endl;
+			if (index == 2) { //升降台的位置，单位m
+				set_csp_pos.int_value = int(
+						value * 1000 / 5 * gear_ratio_lift * value_encoder)
+						+ encoder_zero_position[2];
+			} else if (index >= 5) { //机械臂6个关节的位置
+				//cout<<">=5"<<endl;
+				if (index == 7) {
+					set_csp_pos.int_value = int(
+							value / PI / 2 * gear_ratio_arm
+									* value_encoder)
+							+ encoder_zero_position[index];
+					//cout<<"7: "<<set_csp_pos.int_value;
+				} else {
+					set_csp_pos.int_value = -int(
+							value / PI / 2 * gear_ratio_arm
+									* value_encoder)
+							+ encoder_zero_position[index];
+					//cout<<index<<": "<<set_csp_pos.int_value;
+				}
+			}
+		}
+		g_general_6s->set_pdo_value(0x607a, index, set_csp_pos);
+	} else {
+		Pdo_value set_value;
+		set_value.int_value = int(value);
+		g_general_6s->set_pdo_value(adrr, index, set_value);
+	}
+}
+
+// 从第index个伺服读取对象字典adrr位置的数据
+double get_xx(int adrr, int index) {
+	Pdo_value get_pdo = g_general_6s->get_pdo_value(adrr, index);
+	//读取电机转速
+	if (adrr == 0x606c) {
+		if (index == 1) {			//右驱动轮运动的线速度
+			return -double(get_pdo.int_value) / value_encoder / gear_ratio_drive
+					* 2 * PI * radius_wheel;
+		} else if (index == 3) {			//左驱动轮运动的线速度
+			return double(get_pdo.int_value) / value_encoder / gear_ratio_drive
+					* 2 * PI * radius_wheel;
+		} else if (arm_mode == velocity_mode) {		//只有arm工作在csv模式下，才允许读取速度反馈
+			if (index == 2) {			//升降台的升降线速度
+				return double(get_pdo.int_value) / value_encoder
+						/ gear_ratio_lift * 5 / 1000;
+			} else if (index >= 5) {			//机械臂6个关节的转动速度
+				if (index == 7) {
+					return double(get_pdo.int_value) / value_encoder
+							/ gear_ratio_arm * 2 * PI;
+				} else {
+					return -double(get_pdo.int_value) / value_encoder
+							/ gear_ratio_arm * 2 * PI;
+				}
+			}
+		}
+	}
+	//读取电机位置
+	else if (adrr == 0x6064) {
+		if (index == 0 || index == 4) {			//读取两个舵轮现在的角度
+			return double(get_pdo.int_value - encoder_zero_position[index])
+					/ value_encoder / gear_ratio_direc * 2 * PI;
+		} else if (arm_mode == position_mode) {		//只有arm工作在csp模式下，才允许读取位置反馈
+			if (index == 2) {			//读取升降台现在的高度
+				return double(get_pdo.int_value - encoder_zero_position[index])
+						/ value_encoder / gear_ratio_lift * 5 / 1000;
+			} else if (index >= 5) {			//读取机械臂各个关节现在的角度
+				if (index == 7) {
+					return double(
+							get_pdo.int_value - encoder_zero_position[index])
+							/ value_encoder / gear_ratio_arm * 2 * PI;
+				} else {
+					return -double(
+							get_pdo.int_value - encoder_zero_position[index])
+							/ value_encoder / gear_ratio_arm * 2 * PI;
+				}
+			}
+		}
+	} else {
+		return double(get_pdo.int_value);
+	}
+}
+
+/**********************************************************************/
+/**********************移动平台的逆运动学解算函数**********************/
+/********逆运动学：根据线速度和角速度计算各个电机的位置或者转速********/
+/**********************************************************************/
+// 判断两个方向的夹角是钝角还是锐角，钝角返回-1.0，锐角返回1.0
+double sign(double p1, double p2) {
+	if (p1 - p2 > PI / 2.0 || p1 - p2 < -PI / 2.0) {
+		return -1.0;
+	} else {
+		return 1.0;
+	}
+}
+
+// 移动平台的正运动学函数，根据目标线速度与角速度计算换向电机角度和驱动轮转速
+void getWheelVelocities(double v_x, double v_y, double ang_z, double &thetaL,
+		double &velL, double &thetaR, double &velR) {
+	double vr_x = v_x;			//x方向速度
+	double vr_y = v_y;			//y方向速度
+	double va = ang_z;			//绕z轴转速
+
+	if (va != 0) {
+		if (vr_x == 0 && vr_y == 0) {  // 若是速度为0，但由于角速度不为0，说明是要旋转
+			thetaL = 0;
+			thetaR = 0;
+			velL = -wheel_separation_ / 2.0 * va;
+			velR = wheel_separation_ / 2.0 * va;
+		} else {
+			double a = atan2(vr_y, vr_x);
+			double R_x = -vr_y / va, R_y = vr_x / va;
+			double RL_x = R_x, RL_y = -wheel_separation_ / 2.0 + R_y;
+			double RR_x = R_x, RR_y = wheel_separation_ / 2.0 + R_y;
+
+			double aL, aR;
+			if (atan2(RL_y, RL_x) <= 0 && atan2(RL_y, RL_x) > -PI)
+				aL = atan2(RL_y, RL_x) + PI / 2.0;
+			else
+				aL = atan2(RL_y, RL_x) - PI / 2.0;
+			if (atan2(RR_y, RR_x) <= 0 && atan2(RR_y, RR_x) > -PI)
+				aR = atan2(RR_y, RR_x) + PI / 2.0;
+			else
+				aR = atan2(RR_y, RR_x) - PI / 2.0;
+
+			// 4个返回值
+			thetaL = aL;
+			thetaR = aR;
+			velL = sign(aL, a) * sqrt(vr_x * vr_x + vr_y * vr_y)
+					* sqrt(RL_x * RL_x + RL_y * RL_y)
+					/ sqrt(R_x * R_x + R_y * R_y);
+			velR = sign(aR, a) * sqrt(vr_x * vr_x + vr_y * vr_y)
+					* sqrt(RR_x * RR_x + RR_y * RR_y)
+					/ sqrt(R_x * R_x + R_y * R_y);
+		}
+	} else {
+		double a = atan2(vr_y, vr_x);
+		double aL, aR, a_plus_pi_2;
+		if (a + PI / 2.0 > PI) {
+			a_plus_pi_2 = a + PI / 2.0 - PI * 2.0;
+		} else {
+			a_plus_pi_2 = a + PI / 2.0;
+		}
+		if (a_plus_pi_2 <= 0 && a_plus_pi_2 > -PI) {
+			aR = a_plus_pi_2 + PI / 2.0;
+			aL = a_plus_pi_2 + PI / 2.0;
+		} else {
+			aR = a;
+			aL = a;
+		}
+
+		// 4个返回值
+		thetaL = aL;
+		thetaR = aR;
+		velL = sign(aL, a) * sqrt(vr_x * vr_x + vr_y * vr_y);
+		velR = sign(aR, a) * sqrt(vr_x * vr_x + vr_y * vr_y);
+	}
+}
+
+/**********************************************************************/
+/**********当机械臂为csp 模式时，进行关节插补以控制机器人运动**********/
+/**********************************************************************/
+// 获取机器人当前的构型
+VectorXd get_current_cfg() {
+	VectorXd current_cfg(9);
+	current_cfg << get_xx(0x6064, 0), get_xx(0x6064, 2), get_xx(0x6064, 4), get_xx(
+			0x6064, 5), get_xx(0x6064, 6), get_xx(0x6064, 7), get_xx(0x6064, 8), get_xx(
+			0x6064, 9), get_xx(0x6064, 10);
+	return current_cfg;
+}
+
+// 对移动平台的关节位置线性插补，以弧度为单位, 用于控制移动平台进行运动
+void joint_position_linear_interp(const VectorXd &targetPoint,
+		const VectorXd &originPoint, double Ts, std::deque<double> &deque) {
+	//关节总数
+	int n = 2;
+	//换向电机每周期能走的弧度，约0.000229度
+	double step_direc = 0.000004;
+
+	//计算各轴角位移偏移量
+	VectorXd posOrigin(originPoint);
+	VectorXd posTarget(targetPoint);
+	VectorXd posOffset(n);
+	posOffset = posTarget - posOrigin;
+
+	//计算插补点个数
+	double step_nums, temp = -1;
+	for (int i = 0; i < n; i++) {
+		if (fabs(posOffset(i) / step_direc) > temp) {
+			temp = fabs(posOffset(i) / step_direc);
+		}
+	}
+	step_nums = temp;
+
+	//计算各个关节的插补角度间隔
+	VectorXd unitset(n);
+	for (int i = 0; i < n; i++) {
+		unitset(i) = posOffset(i) / step_nums;
+	}
+
+	//计算各个关节的角度序列
+	for (int i = 1; i <= int(step_nums); i++) {
+		for (int j = 0; j < n; j++) {
+			deque.push_back(posOrigin(j) + double(i) * unitset(j));
+		}
+	}
+	deque.push_back(posTarget(0));
+	deque.push_back(posTarget(1));
+}
+
+// 控制移动平台到达指定的运动状态，两个换向电机采用直线线性插补
+void move_base_2_target(double v_x, double v_y, double a_z) {
+	//根据移动平台的运动学模型，根据(线速度, 角速度)计算(驱动轮转速, 换向电机角度)
+	double thetaL, velL, thetaR, velR;
+	getWheelVelocities(v_x, v_y, a_z, thetaL, velL, thetaR, velR);
+
+	VectorXd joint_target_direc(2), joint_target_drive(2);
+	joint_target_direc(0) = thetaR;
+	joint_target_direc(1) = thetaL;
+	joint_target_drive(0) = velR;
+	joint_target_drive(1) = velL;
+	cout << "<-----base----->" << endl;
+	// 位置插补
+	VectorXd joint_current_direc(2);  ///初始位置,弧度制
+	joint_current_direc(0) = get_xx(0x6064, 0);  ///获取当前位置值as该段插补运动的起点
+	joint_current_direc(1) = get_xx(0x6064, 4);
+
+	double Ts_joint = 0.004;  ///设置运动周期
+	///计算关节插补
+	std::deque<double> trajectory_joint;
+	joint_position_linear_interp(joint_target_direc, joint_current_direc,
+			Ts_joint, trajectory_joint);
+	int trajectory_length = trajectory_joint.size();
+
+	// 速度插补
+	VectorXd joint_current_drive(2);  ///初始速度,m/s
+	joint_current_drive(0) = get_xx(0x606c, 1);  ///获取当前速度作为速度插补的起点
+	joint_current_drive(1) = get_xx(0x606c, 3);
+	// 计算速度插补间隔
+	double vel_diff0 = (joint_target_drive(0) - joint_current_drive(0))
+			/ double(trajectory_length / 2);
+	double vel_diff1 = (joint_target_drive(1) - joint_current_drive(1))
+			/ double(trajectory_length / 2);
+
+	// 逐个向伺服发命令
+	for (int i = 0; i < trajectory_length / 2 - 1; i++) {  //trajectory_length/
+		set_xx(0x607a, 0, trajectory_joint[2 * i]);
+		set_xx(0x607a, 4, trajectory_joint[2 * i + 1]);
+		set_xx(0x60ff, 1, joint_current_drive(0) + double(i + 1) * vel_diff0);
+		set_xx(0x60ff, 3, joint_current_drive(1) + double(i + 1) * vel_diff1);
+		sleep(0.004);
+	}
+	set_xx(0x60b0, 0, trajectory_joint[2 * (trajectory_length / 2 - 1)]);
+	set_xx(0x60b0, 4, trajectory_joint[2 * (trajectory_length / 2 - 1) + 1]);
+	set_xx(0x60ff, 1, joint_target_drive(0));
+	set_xx(0x60ff, 3, joint_target_drive(1));
+	sleep(0.004);
+}
+
+// 控制机械臂运动到指定构型
+void move_arm_2_target(VectorXd joint_target_arm) {
+	// 获取机械臂当前构型
+	VectorXd joint_current_arm(6);  ///初始位置,弧度制
+	joint_current_arm << get_xx(0x6064, 5), get_xx(0x6064, 6), get_xx(0x6064,
+			7), get_xx(0x6064, 8), get_xx(0x6064, 9), get_xx(0x6064, 10);
+
+	// 给队列赋空，以清空关节队列
+	trajectory_joint = std::deque<double>();
+	// 进行关节插补，使机械臂运动到指定构型
+	g_general_6s->move_joint_interp(joint_target_arm * 180.0 / PI,
+			joint_current_arm * 180.0 / PI, velCurrent, accCurrent, Ts, velPerc,
+			accPerc, decPerc, 6, trajectory_joint);
+	// 获取插补队列的长度
+	int trajectory_length = trajectory_joint.size();
+
+	// 逐个向伺服发命令
+	for (int i = 0; i < trajectory_length / 6; i++) {  //trajectory_length/
+		set_xx(0x607a, 5, trajectory_joint[6 * i] / 180.0 * PI);
+		set_xx(0x607a, 6, trajectory_joint[6 * i + 1] / 180.0 * PI);
+		set_xx(0x607a, 7, trajectory_joint[6 * i + 2] / 180.0 * PI);
+		set_xx(0x607a, 8, trajectory_joint[6 * i + 3] / 180.0 * PI);
+		set_xx(0x607a, 9, trajectory_joint[6 * i + 4] / 180.0 * PI);
+		set_xx(0x607a, 10, trajectory_joint[6 * i + 5] / 180.0 * PI);
+		sleep(0.004);
+	}
+	cout << get_xx(0x6064, 5) << " " << get_xx(0x6064, 6) << " "
+			<< get_xx(0x6064, 7) << " " << get_xx(0x6064, 8) << " "
+			<< get_xx(0x6064, 9) << " " << get_xx(0x6064, 10);
+}
+
+// 控制移动机械臂整体运动到指定状态
+void move_whole_2_target(double v_x, double v_y, double a_z, double d_lift,
+		VectorXd joint_target_arm) {
+
+	//根据移动平台的逆运动学，计算两个换向电机的角度与两个驱动轮的速度
+	double thetaL, velL, thetaR, velR;
+	getWheelVelocities(v_x, v_y, a_z, thetaL, velL, thetaR, velR);
+	//构建目标速度向量
+	VectorXd drive_target_vel(2);
+	drive_target_vel << velR, velL;
+	//构建目标构型向量，以方便进行插补
+	VectorXd joint_target_pos(9);
+	joint_target_pos << thetaR, d_lift, thetaL, joint_target_arm(0), joint_target_arm(
+			1), joint_target_arm(2), joint_target_arm(3), joint_target_arm(4), joint_target_arm(
+			5);
+
+	// 获取机器人当前构型
+	VectorXd joint_current = get_current_cfg();  ///初始位置,弧度制
+
+	// 给队列赋空，以清空关节队列
+	trajectory_joint = std::deque<double>();
+
+	// 进行关节插补，使机械臂运动到指定构型
+	g_general_6s->move_joint_interp(joint_target_pos * 180 / PI,
+			joint_current * 180 / PI, velCurrent, accCurrent, Ts, velPerc,
+			accPerc, decPerc, 9, trajectory_joint);
+	int trajectory_length = trajectory_joint.size();
+
+	// 获取当前速度作为速度插补的起点，初始速度,m/s
+	VectorXd drive_current_vel(2);
+	drive_current_vel << get_xx(0x606c, 1), get_xx(0x606c, 3);
+	// 计算速度插补间隔
+	double vel_diff0 = (drive_target_vel(0) - drive_current_vel(0))
+			/ double(trajectory_length / 9);
+	double vel_diff1 = (drive_target_vel(1) - drive_current_vel(1))
+			/ double(trajectory_length / 9);
+
+	// 逐个向伺服发命令
+	for (int i = 0; i < trajectory_length / 9 - 1; i++) {
+		set_xx(0x607a, 0, trajectory_joint[9 * i] / 180.0 * PI);
+		set_xx(0x60ff, 1, drive_current_vel(0) + double(i + 1) * vel_diff0);
+		set_xx(0x607a, 2, trajectory_joint[9 * i + 1] / 180.0 * PI);
+		set_xx(0x60ff, 3, drive_current_vel(1) + double(i + 1) * vel_diff1);
+		set_xx(0x607a, 4, trajectory_joint[9 * i + 2] / 180.0 * PI);
+		set_xx(0x607a, 5, trajectory_joint[9 * i + 3] / 180.0 * PI);
+		set_xx(0x607a, 6, trajectory_joint[9 * i + 4] / 180.0 * PI);
+		set_xx(0x607a, 7, trajectory_joint[9 * i + 5] / 180.0 * PI);
+		set_xx(0x607a, 8, trajectory_joint[9 * i + 6] / 180.0 * PI);
+		set_xx(0x607a, 9, trajectory_joint[9 * i + 7] / 180.0 * PI);
+		set_xx(0x607a, 10, trajectory_joint[9 * i + 8] / 180.0 * PI);
+		sleep(0.004);
+	}
+
+	int i = (trajectory_length / 9 - 1);
+	set_xx(0x607a, 0, trajectory_joint[9 * i] / 180.0 * PI);
+	set_xx(0x60ff, 1, drive_target_vel(0));
+	set_xx(0x607a, 2, trajectory_joint[9 * i + 1] / 180.0 * PI);
+	set_xx(0x60ff, 3, drive_target_vel(1));
+	set_xx(0x607a, 4, trajectory_joint[9 * i + 2] / 180.0 * PI);
+	set_xx(0x607a, 5, trajectory_joint[9 * i + 3] / 180.0 * PI);
+	set_xx(0x607a, 6, trajectory_joint[9 * i + 4] / 180.0 * PI);
+	set_xx(0x607a, 7, trajectory_joint[9 * i + 5] / 180.0 * PI);
+	set_xx(0x607a, 8, trajectory_joint[9 * i + 6] / 180.0 * PI);
+	set_xx(0x607a, 9, trajectory_joint[9 * i + 7] / 180.0 * PI);
+	set_xx(0x607a, 10, trajectory_joint[9 * i + 8] / 180.0 * PI);
+	sleep(0.004);
+}
+
+// 控制机器人整体以期望的速度进行运动
+void move_whole_in_vel_mode(VectorXd q_dot) {
+
+	//首先根据移动平台的逆运动学，计算两换向电机角度以及两驱动轮转速
+	double thetaL, velL, thetaR, velR;
+	getWheelVelocities(q_dot(0), q_dot(1), q_dot(2), thetaL, velL, thetaR,
+			velR);
+
+	VectorXd joint_target_pos(2);
+	joint_target_pos << thetaR, thetaL;
+	// 获取机器人当前构型
+	VectorXd joint_current;
+	joint_current << get_xx(0x6064, 0), get_xx(0x6064, 4);  ///初始位置,弧度制
+
+	// 给队列赋空，以清空关节队列
+	trajectory_joint = std::deque<double>();
+	// 进行关节插补，使机械臂运动到指定构型
+	g_general_6s->move_joint_interp(joint_target_pos * 180 / PI,
+			joint_current * 180 / PI, velCurrent, accCurrent, Ts, velPerc,
+			accPerc, decPerc, 2, trajectory_joint);
+	int trajectory_length = trajectory_joint.size();
+
+	// 逐个向伺服发命令
+	set_xx(0x60ff, 1, velR);
+	set_xx(0x60ff, 3, velL);
+	set_xx(0x60ff, 2, q_dot(3));
+	set_xx(0x60ff, 5, q_dot(4));
+	set_xx(0x60ff, 6, q_dot(5));
+	set_xx(0x60ff, 7, q_dot(6));
+	set_xx(0x60ff, 8, q_dot(7));
+	set_xx(0x60ff, 9, q_dot(8));
+	set_xx(0x60ff, 10, q_dot(9));
+	for (int i = 0; i < trajectory_length / 2; i++) {  //trajectory_length/
+		set_xx(0x607a, 0, trajectory_joint[2 * i] / 180.0 * PI);
+		set_xx(0x607a, 2, trajectory_joint[2 * i + 1] / 180.0 * PI);
+		sleep(0.001);
+	}
+}
+
+/**设置电机参数**/
+void set_para() {
+	Motor_Param motor_pa;
+	motor_pa.encoder.reducRatio[0] = 100.0750;
+	motor_pa.encoder.reducRatio[1] = 120.9730;
+	motor_pa.encoder.reducRatio[2] = 100.9020;
+	motor_pa.encoder.reducRatio[3] = 81.66560;
+	motor_pa.encoder.reducRatio[4] = 50.06260;
+	motor_pa.encoder.reducRatio[5] = 50.39670;
+
+	motor_pa.encoder.singleTurnEncoder[0] = 294.774169921875;
+	motor_pa.encoder.singleTurnEncoder[1] = 15068.894348144531;
+	motor_pa.encoder.singleTurnEncoder[2] = -7966.073913574219;
+	motor_pa.encoder.singleTurnEncoder[3] = 490.006713867188;
+	motor_pa.encoder.singleTurnEncoder[4] = 5050.036010742188;
+	motor_pa.encoder.singleTurnEncoder[5] = 3714.963684082031;
+
+	motor_pa.encoder.direction[0] = -1;
+	motor_pa.encoder.direction[1] = -1;
+	motor_pa.encoder.direction[2] = -1;
+	motor_pa.encoder.direction[3] = 1;
+	motor_pa.encoder.direction[4] = 1;
+	motor_pa.encoder.direction[5] = -1;
+
+	motor_pa.RatedVel_rpm[0] = 239.820134898826;
+	motor_pa.RatedVel_rpm[1] = 198.391376588164;
+	motor_pa.RatedVel_rpm[2] = 237.854551941488;
+	motor_pa.RatedVel_rpm[3] = 293.881389471209;
+	motor_pa.RatedVel_rpm[4] = 479.399791461091;
+	motor_pa.RatedVel_rpm[5] = 476.221657370423;
+
+	motor_pa.maxAcc[0] = 2.50;
+	motor_pa.maxAcc[1] = 2.920;
+	motor_pa.maxAcc[2] = 2.920;
+	motor_pa.maxAcc[3] = 2.50;
+	motor_pa.maxAcc[4] = 2.080;
+	motor_pa.maxAcc[5] = 2.080;
+
+	motor_pa.maxDecel[0] = -2.50;
+	motor_pa.maxDecel[1] = -2.920;
+	motor_pa.maxDecel[2] = -2.920;
+	motor_pa.maxDecel[3] = -2.50;
+	motor_pa.maxDecel[4] = -2.080;
+	motor_pa.maxDecel[5] = -2.080;
+
+	motor_pa.RatedVel[0] = motor_pa.RatedVel_rpm[0] * 6
+			/ motor_pa.encoder.reducRatio[0];
+	motor_pa.RatedVel[1] = motor_pa.RatedVel_rpm[1] * 6
+			/ motor_pa.encoder.reducRatio[1];
+	motor_pa.RatedVel[2] = motor_pa.RatedVel_rpm[2] * 6
+			/ motor_pa.encoder.reducRatio[2];
+	motor_pa.RatedVel[3] = motor_pa.RatedVel_rpm[3] * 6
+			/ motor_pa.encoder.reducRatio[3];
+	motor_pa.RatedVel[4] = motor_pa.RatedVel_rpm[4] * 6
+			/ motor_pa.encoder.reducRatio[4];
+	motor_pa.RatedVel[5] = motor_pa.RatedVel_rpm[5] * 6
+			/ motor_pa.encoder.reducRatio[5];
+
+	for (int i = 0; i < 6; i++) {
+		// deviation
+		motor_pa.encoder.deviation[i] = 0;
+		motor_pa.encoder.encoderResolution[i] = 17;
+		// motor_pa.RatedVel_rpm[i] = 239;
+		// motor_pa.maxAcc[i] =  2.99;
+		// motor_pa.maxDecel[i] = -2.99;
+		motor_pa.maxRotSpeed[i] = 1;
+		// motor_pa.RatedVel[i] = motor_pa.RatedVel_rpm[i] * 6 / motor_pa.encoder.reducRatio[i];
+		motor_pa.DeRatedVel[i] = -motor_pa.RatedVel[i];
+	}
+	g_general_6s->set_motor_param(motor_pa);
+}
+
+int start_controller() {
+	// initialize robot ptr and register the cycle run function in class Robot
+	g_general_6s = new General_6S();
+	printf("<---------- mobile manipulator %p ---------->\n", g_general_6s);
+	g_general_6s->register_cycle_run();
+	//设置电机参数
+	set_para();
+
+	zero_cfg << 0, 0, 0, 0, 0, 0, 0, 0, 0;
+	ready_cfg << 0, 0, 0, 0, 0, PI / 2, 0, -PI / 2, 0;
+	package_cfg << 0, 0, 0, 0.41879, -0.31173, 2.72605, -2.40812, 0.73312, 0;
+	velCurrent << 0, 0, 0, 0, 0, 0, 0, 0, 0;
+	accCurrent << 0, 0, 0, 0, 0, 0, 0, 0, 0;
+
+	// 设置伺服的运动模式: 8 for csp(位置运动模式) and 9 for csv(速度运动模式)，并使能伺服
+	// servo 0: right direction motor, 1: right drive motor,    2: lift motor, 
+	//       3: left drive motor,      4: left direction motor, 
+	//       5: joint 1                6: joint 2               7: joint 3
+	//       8: joint 4                9: joint 5              10: joint 6
+	for (int i = 0; i < 11; i++) 
+	{
+		// 不管有没有错，先清个错，然后使能
+		set_xx(0x6040, i, 128);
+		sleep(1);
+		//读取状态字并显示
+		cout << get_xx(0x6041, i) << " ";
+
+		if (i == 1 || i == 3) 
+		{	//两个驱动轮运行在速度模式下
+			set_xx(0x6060, i, 9);
+			sleep(0.5);	// 往0x6060写控制模式，9为csv
+		} 
+		else 
+		{	//换向电机、升降台、机械臂6个关节运行在位置模式下
+			set_xx(0x6060, i, 8);
+			sleep(0.5);	// 8为csp
+		}
+
+		//读取当前位置，并写进目标位置，防止报错(故障代码0x8012, 位置超限保护)
+		Pdo_value get_pdo = g_general_6s->get_pdo_value(0x6064, i);
+		g_general_6s->set_pdo_value(0x607a, i, get_pdo);
+
+		set_xx(0x6040, i, 6);
+		sleep(1);	// 往控制字0x6040
+		set_xx(0x6040, i, 7);
+		sleep(1);	// 依次写6、7、15即可使能，每次写完需要上电等待 1 s
+		set_xx(0x6040, i, 15);
+		sleep(1);
+
+		cout << i << " ";
+//		cout<<get_xx(0x603f,i)<< std::endl;  // 读取故障代码并输出
+		cout << get_xx(0x6041, i) << std::endl;	//读取状态字并输出
+	}
+
+	std::cout << "please input your command:"<<std::endl;
+    std::cout<<"# for end; z for zero configure; r for ready configure; p for package configure;"<<std::endl;
+	char ch;
+	std::cin >> ch;
+	while (ch != '#') 
+	{
+		VectorXd cur_cfg = get_current_cfg();
+		if (ch == 'z') 
+		{  // 机械臂到零点姿态
+			VectorXd target_cfg(6);
+			target_cfg << zero_cfg(3), zero_cfg(4), zero_cfg(5), zero_cfg(6), zero_cfg(7), zero_cfg(8);
+			
+			move_arm_2_target(target_cfg);
+			cout << target_cfg(0) << " " << target_cfg(1) << " "
+					<< target_cfg(2) << " " << target_cfg(3) << " "
+					<< target_cfg(4) << " " << target_cfg(5) << " " << '\n';
+		} 
+		else if (ch == 'r') 
+		{  // 机械臂到准备姿态
+			VectorXd target_cfg(6);
+			target_cfg << ready_cfg(3), ready_cfg(4), ready_cfg(5), ready_cfg(6), ready_cfg(7), ready_cfg(8);
+			move_arm_2_target(target_cfg);
+			std::cout << target_cfg(0) << " " << target_cfg(1) << " "
+					<< target_cfg(2) << " " << target_cfg(3) << " "
+					<< target_cfg(4) << " " << target_cfg(5) << " " << '\n';
+		} 
+		else if (ch == 'p') 
+		{  // 机械臂到打包姿态
+			VectorXd target_cfg(6);
+			target_cfg << package_cfg(3), package_cfg(4), package_cfg(5), package_cfg(6), package_cfg(7), package_cfg(8);
+			move_arm_2_target(target_cfg);
+			std::cout << target_cfg(0) << " " << target_cfg(1) << " "
+					<< target_cfg(2) << " " << target_cfg(3) << " "
+					<< target_cfg(4) << " " << target_cfg(5) << " " << '\n';
+		}
+
+		cin >> ch;
+	}
+
+	return 0;
+}
+
+void add_pdo_object() {
+	// 设置控制模式，csp 8 or csv 9
+	Robot::add_pdo(0x6060, pdo_object_type::uchar_);
+	// 控制模式显示
+	Robot::add_pdo(0x6061, pdo_object_type::uchar_);
+
+	// 控制字
+	Robot::add_pdo(0x6040, pdo_object_type::short_);
+	// 状态字
+	Robot::add_pdo(0x6041, pdo_object_type::short_);
+	// huiyuanmoshi
+	Robot::add_pdo(0x6098, pdo_object_type::short_);
+	// guzhangdaima
+	Robot::add_pdo(0x603f, pdo_object_type::int_);
+
+	/* csv mode */
+	// 给定位置
+	Robot::add_pdo(0x607a, pdo_object_type::int_);
+	// 位置偏移
+	Robot::add_pdo(0x60b0, pdo_object_type::int_);
+	// 位置反馈
+	Robot::add_pdo(0x6064, pdo_object_type::int_);
+	// 转速反馈
+	Robot::add_pdo(0x606c, pdo_object_type::int_);
+
+	/* csv mode */
+	// 速度给定
+	Robot::add_pdo(0x60ff, pdo_object_type::int_);
+	// 速度偏置
+	Robot::add_pdo(0x60b1, pdo_object_type::uint_);
+	// 最大电机转速
+	Robot::add_pdo(0x6080, pdo_object_type::int_);
+}
+
+int main(int argc, char* argv[]) {
+
+	/*PDO配置*/
+	add_pdo_object();
+	printf("pdo has been inserted\n");
+	//启动主站
+	start_ecm(3, argv);
+
+	//启动控制器程序
+	start_controller();
+
+	//循环显示
+	loop_display();
+}
