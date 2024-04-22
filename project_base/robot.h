@@ -10,6 +10,7 @@
 #include<deque>
 #include<memory>
 #include<stdio.h>
+#include<unistd.h>
 
 #include "EcMasterApi.h"
 

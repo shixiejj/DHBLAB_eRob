@@ -54,36 +54,45 @@ static ec_slave_config_t *sc[Number] ;    //根据从站的个数定
 static ec_slave_config_state_t sc_state[Number] ;
 
 typedef struct{
-    unsigned int operation_mode;
-    unsigned int target_position;
-    unsigned int digital_outputs;
     unsigned int ctrl_word;
-    unsigned int position_actual_value;
-    unsigned int digital_inputs;
+    unsigned int target_torque;
+    unsigned int target_position;
+    unsigned int max_motor_speed;
+    unsigned int target_velocity;
+    unsigned int operation_mode;
+
+    unsigned int error_code;
     unsigned int status_word;
-    int actual_current;
-    unsigned int actual_speed;
-    int  actual_torque;
+    unsigned int position_actual_value;
+    unsigned int velocity_actual_value;
+    unsigned int torque_actual_value;
+    unsigned int operation_mode_display;
+
 }offset_t;
 
 /*Config PDOs*****只需要在需要读取电机更多的状态的时候进行改写，所有从站共用一个*/
 static ec_pdo_entry_info_t slave_0_pdo_entries[] = {
-    /*RxPdo 0x1600*/
-    {0x607a, 0x00, 32}, /* Target Position */
-    {0x60fe, 0x00, 32}, /* Digital outputs */
+    /*RxPdo 0x1608*/
     {0x6040, 0x00, 16}, /* Control Word */
-    /*TxPdo 0x1A00*/
-    {0x6064, 0x00, 32}, /* Position Actual Value */
-    {0x60fd, 0x00, 32}, /* Digital inputs */
+    {0x6071, 0x00, 16}, /* Target Torque */
+    {0x607a, 0x00, 32}, /* Target Position */
+    {0x6080, 0x00, 32}, /* Max Motor Speed */
+    {0x60ff, 0x00, 32}, /* Target Velocity */
+    {0x6060, 0x00, 8}, /* Modes of Operation */
+    
+    /*TxPdo 0x1A06*/
+    {0x603f, 0x00, 16}, /* Error Code */
     {0x6041, 0x00, 16}, /* Status Word */
-    {0x6078,0x00,16},  /*actual corrent*/
-    {0x606c,0x00,32},  /*actual speed*/
-    {0x6077,0x00,16},  /*actual torque*/
+    {0x6064, 0x00, 32}, /* Position Actual Value */
+    {0x606c, 0x00, 32}, /* Velocity Actual value */
+    {0x6077, 0x00, 16}, /* Torque Actual Value */
+    {0x6061, 0x00, 8}, /* Modes of Operation Display*/
+    //{0x6078, 0x00, 16},  /*actual current*/
 };
 
 static ec_pdo_info_t slave_0_pdos[] = {                 
-    {0x1600, 3, slave_0_pdo_entries + 0},
-    {0x1a00, 6, slave_0_pdo_entries + 3},
+    {0x1608, 6, slave_0_pdo_entries + 0},
+    {0x1a06, 6, slave_0_pdo_entries + 6},
 };    //其中第二行的参数需要根据上面的txpdo与rxpdo的个数进行修改
 
 static ec_sync_info_t slave_0_syncs[] = {

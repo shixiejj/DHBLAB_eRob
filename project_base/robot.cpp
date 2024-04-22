@@ -99,14 +99,14 @@ void Robot::power_on()
 		//*(slave_vector[slave_num[i]].control_word) = 0;
 		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0 );
 	}
-	OsSleep(10);
+	usleep(10000);
 	for (unsigned int  i=0; i < axis_sum; i++)
 	{
 		//*(slave_vector[slave_num[i]].control_word) = 0x80;
 		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x80 );
 
 	}
-    OsSleep(10);
+    usleep(10000);
     int32_t actual_pos[axis_sum];
     for(unsigned int i = 0; i < axis_sum; i++)
     {
@@ -123,7 +123,7 @@ void Robot::power_on()
 		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
 		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] ); 
     }
-    OsSleep(1000);
+    sleep(1);
 
     for(int i=0;i<axis_sum;i++)
     {
@@ -132,7 +132,7 @@ void Robot::power_on()
 		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
 		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] );
     }
-    OsSleep(1000);
+    sleep(1);
 
     for(int i=0;i<axis_sum;i++)
     {
@@ -161,7 +161,7 @@ void Robot::power_off()
 		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
 		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] ); 
     }
-	OsSleep(1000);
+	sleep(1);
 
 	for(int i=0;i<axis_sum;i++)
 	{

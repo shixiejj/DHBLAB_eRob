@@ -204,7 +204,7 @@ void config_ec(int axisnum)
     int p = 0;
     for (int i = 0; i < Number; i++)
     {
-        for (int j = 0; j < 8; j++)
+        for (int j = 0; j < 12; j++)
         {
             domain1_regs[p++] = {0, i, VID_PID, slave_0_pdo_entries[j].index, slave_0_pdo_entries[j].subindex, &offset[i] + j * 4};
         }
