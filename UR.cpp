@@ -11,8 +11,6 @@
 #include <iostream>
 
 
-
-
 void UR::calc_forward_kin(const VectorXd& posACS,MatrixXd& transMatrix)
 {
 	VectorXd acs_rad(6);

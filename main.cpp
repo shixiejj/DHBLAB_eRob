@@ -8,11 +8,9 @@
 #include <stdlib.h>
 #include "server.cpp"
 
-
 #include <fcntl.h>
 #include <unistd.h>	
 #include <errno.h>
-#include <sys/ioctl.h>
 
 #include <cmath>
 #include <iostream>
@@ -20,7 +18,7 @@
 #include <map>
 #include <time.h>
 // #include "server.cpp"
-#include <thread>
+#include <pthread.h>
 
 #include "slave/slave.h"
 #include "robot_type.h"
@@ -37,6 +35,7 @@ using namespace std;
 UR* g_UR = nullptr;
 General_6S* g_General_6s = nullptr;
 std::vector<Slave> slave_vector;
+pthread_t thread;
 
 T521G2 sensor;
 SerialPort sp;
@@ -142,10 +141,9 @@ void printDeque(deque<double>& d) {
 }
 
 
-int cycle_run()
+void cycle_run()
 {
 	g_UR->cycle_run();
-	return 0;
 }
 
 
@@ -2446,12 +2444,19 @@ void serial_read(){
     cout << "数据为:" << sp.Force_Sensor.first << endl;
 }
 
+void eRob_status_read() {
+    for(int i=0; i < Number; i++) {
+        uint16_t status = g_UR->get_status_word(i);
+        printf("%d轴状态:%d \n", &i, &status);
+    }
+}
+
 
 void joint_cmd_action()
 {
 
-    cout << "开启线程,执行任务tcp 任务" << endl;
-    thread thread_obj(tcp_server);
+    //cout << "开启线程,执行任务tcp 任务" << endl;
+    //thread thread_obj(tcp_server);
     char control_str[100];
 
     map<string, FnPtr> func_map = {
@@ -2493,6 +2498,8 @@ void joint_cmd_action()
 
         {"sensor_read",sensor_read},
         {"sensor_start",sensor_start},
+
+        {"read_status",eRob_status_read},
 
         {"serial_read",serial_read},
         {"serial_start",serial_start}
@@ -2642,7 +2649,7 @@ void test_UR_func()
 }
 
 
-int start_controller()
+int create_controller()
 {
 	///初始化robot指针
 	// g_General_6s = new General_6S(); ///通用六轴模型
@@ -2656,28 +2663,6 @@ int start_controller()
 	for(int i = 0;i < g_UR->axis_sum;i++)
 		g_UR->slave_num[i] = i+1;  ///设置机器人各轴对应的从站序号, 从站序号从0开始
 
-	registerCustomeAppWorkpd(cycle_run);  ///注册循环执行的函数，每个通讯周期调用一次
-
-	//pdo测试
-	for(int i = 0; i < g_UR->axis_sum;i++)
-	{
-		(*slave_vector[g_UR->slave_num[i]].mode_of_operation) = 8;
-	}
-		printf("555 \n");
-
-	EC_T_WORD mode_of_operation[g_UR->axis_sum];
-	for(int i = 0; i < g_UR->axis_sum;i++)
-	{
-		mode_of_operation[i] = *(slave_vector[g_UR->slave_num[i]].mode_of_operation);
-		printf("%i ", mode_of_operation[i]);
-	}
-	printf("\n");
-	///功能测试函数
-	// test_general_6s_func(); ///通用六轴模型示例程序
-	test_UR_func(); //////UR模型示例程序
-
-	printf("test_general_6s_func out \n");
-
 	return 0;
 }
 
@@ -2690,53 +2675,104 @@ return 0;
 void myprintf(unsigned char c1, const char *s1, const char *s2, const char *s3, const long n, const char *format, ...)
 {
 
- char dest[1024 * 16*16];
- va_list argptr;
- va_start(argptr, format);
- vsprintf(dest, format, argptr);
- va_end(argptr);
- printf(dest);
+    char dest[1024 * 16 * 16];
+    va_list argptr;
+    va_start(argptr, format);
+    vsprintf(dest, format, argptr);
+    va_end(argptr);
+    printf(dest);
+}
+
+int create_pthread() {
+    struct sched_param param;
+    pthread_attr_t attr;
+    int ret;
+
+    /* Initialize pthread attributes (default values) */
+    ret = pthread_attr_init(&attr);
+    if (ret) {
+         printf("init pthread attributes failed\n");
+        goto out;
+    }
+
+    /* Set a specific stack size  */
+     ret = pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN);
+    if (ret) {
+        printf("pthread setstacksize failed\n");
+        goto out;
+    }
+
+    /* Set scheduler policy and priority of pthread */
+    ret = pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+    if (ret) {
+        printf("pthread setschedpolicy failed\n");
+        goto out;
+    }
+    param.sched_priority = 80;
+    ret = pthread_attr_setschedparam(&attr, &param);
+    if (ret) {
+        printf("pthread setschedparam failed\n");
+        goto out;
+    }
+    /* Use scheduling parameters of attr */
+    ret = pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+    if (ret) {
+        printf("pthread setinheritsched failed\n");
+        goto out;
+    }
+
+    /* Create a pthread with specified attributes */
+    ret = pthread_create(&thread, &attr, ec_thread_func, (void *)cycle_run);
+    if (ret) {
+        printf("create pthread failed\n");
+        goto out;
+    }
+    return 0;
+out:
+    return ret;
 }
 
 int main()
 {
-	int nArgc = 1;
-    char *argv[8];
-    int CycleTime = 1000;
-
-    argv[0]=(char *)(&CycleTime);
-
-    enableRealtimeEnvironment();
-
-    EC_PF_EC_START_CustomeLog_CALLBACK p2 = myprintf;
-    // registerCustomeAppLog(p2);
-
-    printf("startEcMaster\n");
-    startEcMaster(nArgc,argv);
-
- ///获取从站ID和product code
- std::vector<std::pair<unsigned int, unsigned int> > slave_ID_vector;
- getSlaveIDVec(slave_ID_vector);
-
- ///获取输入和输出pdo地址
- PDOAddrVec out_PDO_address_vector, in_PDO_address_vector;
- getPDOAddrVec(out_PDO_address_vector, in_PDO_address_vector);
-
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
+        perror("mlockall failed");
+        return -1;
+    }
+	if(config_ec() == -1) {
+        return -1;
+    }
 
 	//把pdo地址存入变量中
- for(int i = 0;i < out_PDO_address_vector.size();i++)
- {
-    Slave slave_temp(out_PDO_address_vector[i], in_PDO_address_vector[i]);
-    slave_vector.push_back(slave_temp);
- }
+    for(int i = 0; i < Number; i++) {
+        Slave slave_temp(domain1_pd, erob_offset[i]);
+        slave_vector.push_back(slave_temp);
+    }
 
- EC_PF_EC_START_AppWorkpd_CALLBACK p = CALLBACK;
- registerCustomeAppWorkpd(p);
-//  createPthread();
- ///启动控制器程序
- start_controller();
- ///循环显示
- loop_display();
+    //初始化控制器程序
+    create_controller();
+    if(create_pthread()) {
+        printf("thread create failed! \n");
+    }
+    sleep(1);
+    //功能测试函数
+    //pdo测试
+	for(int i = 0; i < g_UR->axis_sum;i++)
+	{
+		//(*slave_vector[g_UR->slave_num[i]].mode_of_operation) = 8;
+        EC_WRITE_S8(slave_vector[g_UR->slave_num[i]].mode_of_operation, 8);
+	}
+	printf("mode test written \n");
+
+	uint8_t mode_of_operation[g_UR->axis_sum];
+	for(int i = 0; i < g_UR->axis_sum;i++)
+	{
+		mode_of_operation[i] = EC_READ_S8(slave_vector[g_UR->slave_num[i]].mode_of_operation_display);
+		printf(" operation: %i ", mode_of_operation[i]);
+	}
+	printf("\n");
+	//test_general_6s_func();   //通用六轴模型示例程序
+	test_UR_func();             //UR模型示例程序
+
 }
 
 

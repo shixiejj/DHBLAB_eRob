@@ -1,6 +1,6 @@
 #include "ec_config.h"
 
-offset_t offset[Number];
+offset_t erob_offset[Number];
 
 struct timespec timespec_add(struct timespec time1, struct timespec time2)
 {
@@ -79,8 +79,10 @@ void check_slave_config_states(void)
 }
 /****************************************************************************/
 
+//参数输入用户自定义循环函数，不做过多占时处理，尽量做简单的数据处理
 void *ec_thread_func(void *data)
 {
+    FnCyc func_cyc = (FnCyc)data;
     struct timespec wakeupTime, time;
 #ifdef MEASURE_TIMING
     struct timespec startTime, endTime, lastStartTime = {};
@@ -167,11 +169,34 @@ void *ec_thread_func(void *data)
             blink = !blink;
         }
 
+        if (sync_ref_counter)
+        {
+            sync_ref_counter--;
+        } 
+        else 
+        {
+            sync_ref_counter = 1; // sync every cycle   每个循环周期用来同步
+            clock_gettime(CLOCK_TO_USE, &time);
+            ecrt_master_sync_reference_clock_to(master, TIMESPEC2NS(time));
+
+            //用户自定义循环函数
+            if(func_cyc != NULL) {
+                func_cyc();
+            }
+
+
+        }
+        ecrt_master_sync_slave_clocks(master);
+        ecrt_domain_queue(domain1);//将数据域的所有报文插入到主站的报文序列
+        ecrt_master_send(master);//将主站所有报文发送到传输序列
+        #ifdef MEASURE_TIMING
+        clock_gettime(CLOCK_TO_USE, &endTime);
+        #endif
 
     }
 }
 
-void config_ec(int axisnum)
+int config_ec(void)
 {
     master = ecrt_request_master(0); // 请求EtherCAT主机进行实时操作。
     if (!master)
@@ -206,10 +231,16 @@ void config_ec(int axisnum)
     {
         for (int j = 0; j < 12; j++)
         {
-            domain1_regs[p++] = {0, i, VID_PID, slave_0_pdo_entries[j].index, slave_0_pdo_entries[j].subindex, &offset[i] + j * 4};
+            domain1_regs[p++].alias = 0;
+            domain1_regs[p++].position = i;
+            domain1_regs[p++].vendor_id = 0x5a65726f;
+            domain1_regs[p++].product_code = 0x00029252;
+            domain1_regs[p++].index = slave_0_pdo_entries[j].index;
+            domain1_regs[p++].subindex = slave_0_pdo_entries[j].subindex;
+            domain1_regs[p++].offset = (unsigned int *)&erob_offset[i] + (j * 4);
         }
     }
-    domain1_regs[p++] = {};
+    domain1_regs[p++].index = 0;
 
     const ec_pdo_entry_reg_t *domain1_regs_const = domain1_regs;
     if (ecrt_domain_reg_pdo_entry_list(domain1, domain1_regs_const))
@@ -242,4 +273,5 @@ void config_ec(int axisnum)
     {
         perror("sched_setscheduler failed");
     }
+    return 0;
 }

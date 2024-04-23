@@ -63,7 +63,7 @@ int32_t T521G2::get_val_sensor()
 
 int32_t T521G2::get_status_sensor()
 {
-    
+    return 0;
 }
 
 void T521G2::write_val_sensor(int addr, int value)

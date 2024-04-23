@@ -10,13 +10,12 @@
 
 #include <vector>
 
-#include "../project_base/EcMasterApi.h"
 #include "../ec_config.h"
 
 class Slave
 {
 public:
-	Slave(const uint8_t &dom, const offset_t &off);
+	Slave(const uint8_t *dom, const offset_t &off);
 
 	//EC_T_WORD*                 	 word_0x6061;        //存储错误码地址
 
@@ -29,6 +28,7 @@ public:
 	uint16_t*                   control_word;        //存储控制字地址
 	int32_t*                 target_position;     //存储目标位置地址
 	uint8_t*                   mode_of_operation;   //存储操作模式地址
+	uint8_t*                   mode_of_operation_display;   //存储操作模式显示地址
 	int16_t*                  target_torq;   //存储目标转矩地址
 };
 

@@ -12,7 +12,7 @@ extern std::vector<Slave> slave_vector;
 
 Robot::Robot()
 {
-	axis_sum = 6;
+	axis_sum = Number;
 	dh = DH_param();
 	decare = Decare_Para();
 	motor_param = Motor_Param();
@@ -178,7 +178,7 @@ double Robot::get_actual_position(int axis)
 	if(axis >= axis_sum)
 		return -1;
 	//EC_T_SDWORD actual_pos = *(slave_vector[slave_num[axis]].actual_position);
-	int32_t actual_pos = EC_READ_S32(slave_vector[slave_num[i]].actual_position);
+	int32_t actual_pos = EC_READ_S32(slave_vector[slave_num[axis]].actual_position);
 	double angle = 0;
 	incToAngle(actual_pos, angle, axis);
 	return angle;
@@ -189,7 +189,7 @@ void Robot::set_target_position(int axis, double targetPosition)
 		return;
 	int32_t target_pos_inc;
 	angleToInc(targetPosition, target_pos_inc, axis);
-	EC_WRITE_S32(slave_vector[slave_num[i]].target_position, target_pos_inc);
+	EC_WRITE_S32(slave_vector[slave_num[axis]].target_position, target_pos_inc);
 	//(*slave_vector[slave_num[axis]].target_position) = target_pos_inc;
 }
 bool Robot::get_power_on_status()
@@ -204,7 +204,7 @@ int16_t Robot::get_actual_torque(int axis)
 	int16_t actual_torq = EC_READ_S16(slave_vector[slave_num[axis]].actual_torque);
 	return actual_torq;
 }
-int Robot::get_status_word(int axis)
+uint16_t Robot::get_status_word(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;

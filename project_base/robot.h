@@ -12,8 +12,6 @@
 #include<stdio.h>
 #include<unistd.h>
 
-#include "EcMasterApi.h"
-
 #include "../eigen/Eigen/Eigen"
 #include "struct_define.h"
 #include "trajectory.h"
@@ -89,7 +87,7 @@ public:
 	void set_target_position(int axis,double targetPosition);
 
 	/**
-	* @brief 获取使能状态
+	* @brief 获取机器人上电状态
 	*/
 	bool get_power_on_status();
 
@@ -101,7 +99,7 @@ public:
 	/**
 	* @brief 获取状态字
 	*/
-	int get_status_word(int axis);
+	uint16_t get_status_word(int axis);
 
 	/**
 	* @brief 获取实际速度,速度单位取决于伺服输出的单位
