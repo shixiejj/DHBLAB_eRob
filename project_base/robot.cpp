@@ -94,52 +94,61 @@ unsigned int Robot::get_angle_deque_size()
 }
 void Robot::power_on()
 {
-	for (unsigned int  i=0; i < axis_sum; i++)
-	{
-		//*(slave_vector[slave_num[i]].control_word) = 0;
-		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0 );
-	}
-	usleep(10000);
+	// for (unsigned int  i=0; i < axis_sum; i++)
+	// {
+	// 	//*(slave_vector[slave_num[i]].control_word) = 0;
+	// 	EC_WRITE_U16(slave_vector[i].control_word, 0 );
+	// 	printf("set control %d: 0 \n", i);
+	// }
+	sleep(2);
 	for (unsigned int  i=0; i < axis_sum; i++)
 	{
 		//*(slave_vector[slave_num[i]].control_word) = 0x80;
-		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x80 );
-
+		EC_WRITE_U16(slave_vector[i].control_word, 0x80 );
+		printf("set control %d: 0x80 \n", i);
 	}
-    usleep(10000);
+    sleep(2);
     int32_t actual_pos[axis_sum];
     for(unsigned int i = 0; i < axis_sum; i++)
     {
     	//actual_pos[i] = *(slave_vector[slave_num[i]].actual_position);
-		actual_pos[i] = EC_READ_S32(slave_vector[slave_num[i]].actual_position);
+		actual_pos[i] = EC_READ_S32(slave_vector[i].actual_position);
 		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] ); 
+		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] ); 
     }
-
+	sleep(2);
     for(int i = 0;i < axis_sum;i++)
     {
 		//*(slave_vector[slave_num[i]].control_word) = 6;
-		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x06 );
+		EC_WRITE_U16(slave_vector[i].control_word, 0x06 );
+		printf("set control %d: 0x06 \n", i);
 		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] ); 
+		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] ); 
     }
-    sleep(1);
+    sleep(2);
 
     for(int i=0;i<axis_sum;i++)
     {
 		//*(slave_vector[slave_num[i]].control_word) = 7;
-		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x07 );
+		EC_WRITE_U16(slave_vector[i].control_word, 0x07 );
+		printf("set control %d: 0x07 \n", i);
 		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] );
+		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] );
     }
-    sleep(1);
+    sleep(2);
 
     for(int i=0;i<axis_sum;i++)
     {
 		//*(slave_vector[slave_num[i]].control_word) = 15;
-		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x0f );
+		EC_WRITE_U16(slave_vector[i].control_word, 0x0f );
+		printf("set control %d: 0x0f \n", i);
 		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] );
+		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] );
+    }
+	sleep(2);
+	for(unsigned int i = 0; i < axis_sum; i++)
+    {
+		EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] ); 
     }
     poweronstatus = true;
 	return;
@@ -192,6 +201,12 @@ void Robot::set_target_position(int axis, double targetPosition)
 	EC_WRITE_S32(slave_vector[slave_num[axis]].target_position, target_pos_inc);
 	//(*slave_vector[slave_num[axis]].target_position) = target_pos_inc;
 }
+void Robot::set_target_position_demo(int32_t targetPosition)
+{
+	for(int i=0; i<axis_sum; i++) {
+		EC_WRITE_S32(slave_vector[i].target_position, targetPosition);
+	}
+}
 bool Robot::get_power_on_status()
 {
 	return poweronstatus;
@@ -209,7 +224,7 @@ uint16_t Robot::get_status_word(int axis)
 	if(axis >= axis_sum)
 		return -1;
 	//EC_T_WORD status_word = *(slave_vector[slave_num[axis]].status_word);
-	uint16_t status_word = EC_READ_U16(slave_vector[slave_num[axis]].status_word);
+	uint16_t status_word = EC_READ_U16(slave_vector[axis].status_word);
 	return status_word;
 }
 int Robot::get_actual_velocity(int axis)

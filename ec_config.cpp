@@ -1,6 +1,61 @@
 #include "ec_config.h"
 
 offset_t erob_offset[Number];
+// EtherCAT
+static ec_master_t *master = NULL;
+static ec_master_state_t master_state = {};
+static ec_domain_t *domain1 = NULL;
+static ec_domain_state_t domain1_state = {};
+
+static ec_pdo_entry_reg_t domain1_regs[14*Number+1];
+
+// process data
+uint8_t *domain1_pd = NULL;
+
+/****************111111111111***********************/
+static ec_slave_config_t *sc_arr[Number];    //根据从站的个数定
+static ec_slave_config_state_t sc_state[Number];
+
+static unsigned int counter = 0;
+static unsigned int blink = 0;
+static unsigned int sync_ref_counter = 0;
+const struct timespec cycletime = {0, PERIOD_NS};
+
+/*Config PDOs*****只需要在需要读取电机更多的状态的时候进行改写，所有从站共用一个*/
+ec_pdo_entry_info_t slave_0_pdo_entries[] = {
+    /*RxPdo 0x1608*/
+    {0x6040, 0x00, 16}, /* Control Word */
+    {0x6071, 0x00, 16}, /* Target Torque */
+    {0x607a, 0x00, 32}, /* Target Position */
+    {0x6080, 0x00, 32}, /* Max Motor Speed */
+    {0x60ff, 0x00, 32}, /* Target Velocity */
+    {0x6060, 0x00, 8}, /* Modes of Operation */
+    {0x6061, 0x00, 8}, /* Modes of Operation Display*/
+    
+    /*TxPdo 0x1A06*/
+    {0x603f, 0x00, 16}, /* Error Code */
+    {0x6041, 0x00, 16}, /* Status Word */
+    {0x6064, 0x00, 32}, /* Position Actual Value */
+    {0x606c, 0x00, 32}, /* Velocity Actual value */
+    {0x6077, 0x00, 16}, /* Torque Actual Value */
+    {0x6061, 0x00, 8}, /* Modes of Operation Display*/
+    {0x6060, 0x00, 8}, /* Modes of Operation */
+    //{0x6078, 0x00, 16},  /*actual current*/
+};
+
+ec_pdo_info_t slave_0_pdos[] = {                 
+    {0x1600, 7, slave_0_pdo_entries + 0},
+    {0x1a00, 7, slave_0_pdo_entries + 7},
+};    //其中第二行的参数需要根据上面的txpdo与rxpdo的个数进行修改
+
+ec_sync_info_t slave_0_syncs[] = {
+    {0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+    {1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+    {2, EC_DIR_OUTPUT, 1, slave_0_pdos + 0, EC_WD_ENABLE},
+    {3, EC_DIR_INPUT, 1, slave_0_pdos + 1, EC_WD_DISABLE},
+    {0xff}
+};  //不需要修改
+
 
 struct timespec timespec_add(struct timespec time1, struct timespec time2)
 {
@@ -61,7 +116,7 @@ void check_slave_config_states(void)
     ec_slave_config_state_t s[Number] = {}; // 根据从站的个数进行修改************************
     for (i = 0; i < Number; i++)
     {
-        ecrt_slave_config_state(sc[i], &s[i]);
+        ecrt_slave_config_state(sc_arr[i], &s[i]);
         if (s[i].al_state != sc_state[i].al_state)
         {
             printf("slave: State 0x%02X.\n", s[i].al_state);
@@ -207,15 +262,16 @@ int config_ec(void)
 
     for (int i = 0; i < Number; i++)
     {
-        sc[i] = ecrt_master_slave_config(master, 0, i, VID_PID);
-        if (!sc[0]) // 第一个参数是所请求的主站实例，第二个包括主站的别名和位置，第三个包括供应商码和产品码
+        sc_arr[i] = ecrt_master_slave_config(master, 0, i, VID_PID);
+        if (!sc_arr[i]) // 第一个参数是所请求的主站实例，第二个包括主站的别名和位置，第三个包括供应商码和产品码
             return -1;
+        printf("sc_arr%d:%d\n",i,sc_arr[i]);
     }
 
     printf("Configuring PDOs...\n");
     for (int i = 0; i < Number; i++)
     {
-        if (ecrt_slave_config_pdos(sc[i], EC_END, slave_0_syncs))
+        if (ecrt_slave_config_pdos(sc_arr[i], EC_END, slave_0_syncs))
         { // 指定完整的PDO配置。第一个参数是获取的从站配置，第二个参数表示同步管理器配置数，EC_END=~u0,第三个参数表示同步管理器配置数组
             fprintf(stderr, "Failed to configure slave PDOs!\n");
             exit(EXIT_FAILURE);
@@ -229,33 +285,37 @@ int config_ec(void)
     int p = 0;
     for (int i = 0; i < Number; i++)
     {
-        for (int j = 0; j < 12; j++)
+        printf("*PDO regs config*:%d\n",i);
+        for (int j = 0; j < 14; j++)
         {
-            domain1_regs[p++].alias = 0;
-            domain1_regs[p++].position = i;
-            domain1_regs[p++].vendor_id = 0x5a65726f;
-            domain1_regs[p++].product_code = 0x00029252;
-            domain1_regs[p++].index = slave_0_pdo_entries[j].index;
-            domain1_regs[p++].subindex = slave_0_pdo_entries[j].subindex;
-            domain1_regs[p++].offset = (unsigned int *)&erob_offset[i] + (j * 4);
+            domain1_regs[p].alias = 0;
+            domain1_regs[p].position = i;
+            domain1_regs[p].vendor_id = 0x5a65726f;
+            domain1_regs[p].product_code = 0x00029252;
+            domain1_regs[p].index = slave_0_pdo_entries[j].index;
+            domain1_regs[p].subindex = slave_0_pdo_entries[j].subindex;
+            domain1_regs[p].offset = (unsigned int *)&erob_offset[i] + j;
+            domain1_regs[p].bit_position = 0;
+            p++;
         }
     }
-    domain1_regs[p++].index = 0;
-
+    domain1_regs[p].index = 0;
+    printf("*finish PDO regs config!*\n");
     const ec_pdo_entry_reg_t *domain1_regs_const = domain1_regs;
     if (ecrt_domain_reg_pdo_entry_list(domain1, domain1_regs_const))
     { // 为进程数据域注册一组PDO项。参数一：创建的进程数据域，参数二：pdo注册数组
         fprintf(stderr, "PDO entry registration failed!\n");
         exit(EXIT_FAILURE);
     }
-
+    printf("*finish PDO regs entry!*\n");
     // configure SYNC signals for this slave
     for (int i = 0; i < Number; i++)
     {
-        ecrt_slave_config_dc(sc[i], 0x0300, PERIOD_NS, 300000, 0, 0); // 此处sync0 shift time设置为周期的30%-40%
+        printf("*start congfig slave dc:%d*\n",i);
+        ecrt_slave_config_dc(sc_arr[i], 0x0300, PERIOD_NS, 500000, 0, 0); // 此处sync0 shift time设置为周期的30%-40%
     }
 
-    printf("Activating master...\n");
+    printf("finish congfig slave dc!\n");
     if (ecrt_master_activate(master)) // 以上激活主站
         return -1;
 
@@ -266,7 +326,7 @@ int config_ec(void)
     /* Set priority */
 
     struct sched_param param = {};
-    param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+    param.sched_priority = 98;
 
     printf("Using priority %i.\n", param.sched_priority);
     if (sched_setscheduler(0, SCHED_FIFO, &param) == -1)

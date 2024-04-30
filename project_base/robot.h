@@ -87,6 +87,11 @@ public:
 	void set_target_position(int axis,double targetPosition);
 
 	/**
+	* @brief 目标位置驱动demo
+	*/
+	void set_target_position_demo(int32_t targetPosition);
+
+	/**
 	* @brief 获取机器人上电状态
 	*/
 	bool get_power_on_status();

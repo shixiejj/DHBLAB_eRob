@@ -56,6 +56,7 @@ void joints_move(VectorXd target_point_joint);
 extern tcpsocket* g_tcp;
 extern void start_ecm(int argc, char* argv[]);
 extern void loop_display();
+extern uint16_t status_test[];
 
 
 // 机械臂是否在动作
@@ -140,10 +141,14 @@ void printDeque(deque<double>& d) {
 	cout << endl;
 }
 
-
+uint16_t status_test[Number];
 void cycle_run()
 {
-	g_UR->cycle_run();
+	//g_UR->cycle_run();
+    for(int i = 0; i < Number; i++) {
+        status_test[i] = g_UR->get_status_word(i);
+        //printf("%d轴状态:%d \n", i+1, status_test[i]);
+    }
 }
 
 
@@ -1870,6 +1875,7 @@ void start_UR(void)
 {
     if (!g_UR->get_power_on_status())
     {
+        printf("start power on! \n");
         //判断使能状态
         g_UR->power_on(); //开启使能
     }
@@ -2446,9 +2452,22 @@ void serial_read(){
 
 void eRob_status_read() {
     for(int i=0; i < Number; i++) {
-        uint16_t status = g_UR->get_status_word(i);
-        printf("%d轴状态:%d \n", &i, &status);
+        uint16_t status_temp = g_UR->get_status_word(i);
+        printf("%d轴状态:%d \n", i, status_temp);
     }
+}
+
+void eRob_demo() {
+    while(1) {
+        for(int i=0; i < Number; i++) {
+            uint32_t actual_position = EC_READ_S32(slave_vector[i].actual_position);
+            printf("position_actual_value%d : %10u\n", i, actual_position);
+            uint32_t target_position = actual_position + 10;
+            EC_WRITE_S32(slave_vector[i].target_position, target_position);
+        }
+        usleep(10000);
+    }
+
 }
 
 
@@ -2500,6 +2519,7 @@ void joint_cmd_action()
         {"sensor_start",sensor_start},
 
         {"read_status",eRob_status_read},
+        {"demo",eRob_demo},
 
         {"serial_read",serial_read},
         {"serial_start",serial_start}
@@ -2708,7 +2728,7 @@ int create_pthread() {
         printf("pthread setschedpolicy failed\n");
         goto out;
     }
-    param.sched_priority = 80;
+    param.sched_priority = 99;
     ret = pthread_attr_setschedparam(&attr, &param);
     if (ret) {
         printf("pthread setschedparam failed\n");
@@ -2742,31 +2762,36 @@ int main()
         return -1;
     }
 
-	//把pdo地址存入变量中
+
+    //初始化控制器程序
+    create_controller();
+    //把pdo地址存入变量中
     for(int i = 0; i < Number; i++) {
         Slave slave_temp(domain1_pd, erob_offset[i]);
         slave_vector.push_back(slave_temp);
     }
 
-    //初始化控制器程序
-    create_controller();
     if(create_pthread()) {
         printf("thread create failed! \n");
     }
-    sleep(1);
+    while(status_test[0] == 0 || status_test[1] == 0)
+    {
+        sleep(1);
+    }
+    printf("get status! \n");
     //功能测试函数
     //pdo测试
-	for(int i = 0; i < g_UR->axis_sum;i++)
+	for(int i = 0; i < Number; i++)
 	{
 		//(*slave_vector[g_UR->slave_num[i]].mode_of_operation) = 8;
-        EC_WRITE_S8(slave_vector[g_UR->slave_num[i]].mode_of_operation, 8);
+        EC_WRITE_S8(slave_vector[i].mode_of_operation, 8);
 	}
 	printf("mode test written \n");
 
 	uint8_t mode_of_operation[g_UR->axis_sum];
-	for(int i = 0; i < g_UR->axis_sum;i++)
+	for(int i = 0; i < Number;i++)
 	{
-		mode_of_operation[i] = EC_READ_S8(slave_vector[g_UR->slave_num[i]].mode_of_operation_display);
+		mode_of_operation[i] = EC_READ_S8(slave_vector[i].mode_of_operation_display);
 		printf(" operation: %i ", mode_of_operation[i]);
 	}
 	printf("\n");
