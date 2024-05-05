@@ -144,7 +144,7 @@ void printDeque(deque<double>& d) {
 uint16_t status_test[Number];
 void cycle_run()
 {
-	//g_UR->cycle_run();
+	g_UR->cycle_run();
     for(int i = 0; i < Number; i++) {
         status_test[i] = g_UR->get_status_word(i);
         //printf("%d轴状态:%d \n", i+1, status_test[i]);

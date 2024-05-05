@@ -149,6 +149,7 @@ protected:
 	std::deque<double> angle_deque;  ///机器人运动队列
 	bool poweronstatus;
 	Trajectory* tarjectory_prt;
+	GSysRunningParm gSysRunning;
 };
 
 

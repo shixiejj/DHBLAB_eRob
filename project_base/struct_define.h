@@ -3,6 +3,26 @@
 
 #include <vector>
 #include <map>
+
+/**
+ * @brief 机器人系统运行控制结构体
+ */
+typedef enum  _SysWorkingStatus
+{
+    SYS_WORKING_POWER_ON,
+    SYS_WORKING_SAFE_MODE,
+    SYS_WORKING_OP_MODE,
+    SYS_WORKING_LINK_DOWN,
+    SYS_WORKING_IDLE_STATUS       //系统空闲
+}SysWorkingStatus;
+
+typedef  struct  _GSysRunningParm
+{
+    SysWorkingStatus   m_gWorkStatus;
+	int op_count;
+}GSysRunningParm;
+
+
 /**
  * @brief DH参数结构体
  */

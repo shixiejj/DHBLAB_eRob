@@ -261,35 +261,94 @@ void Robot::move_line_interp(const VectorXd &targetPoint,
 			Ts, maxVelL, maxAccL, maxDecelL,
 			maxJerk, nAglSeqPtr);
 }
+
+/**		2024-5-3		
+ *		Author: liuchongyang
+ *		@brief 机器人运行循环函数
+ * 		通信周期1ms，每一次通信周期运行一次
+ */
 void Robot::cycle_run()
 {
-	if(!angle_deque.empty()&& poweronstatus)
-	{
-		double temp_pos[axis_sum];
+	switch (gSysRunning.m_gWorkStatus) {
+	case SYS_WORKING_SAFE_MODE:
+		break;
 
-		for(int i=0;i<axis_sum;i++)
-		{
-			temp_pos[i] = angle_deque.front();
-			//2024.4.11增加各轴限位
-			if(i==1 && (temp_pos[1]<-70 || temp_pos[1]> 70))
-			{
-				return;
+	case SYS_WORKING_OP_MODE:
+		gSysRunning.op_count++;
+		if(gSysRunning.op_count <= 900 && !poweronstatus) {
+			switch (gSysRunning.op_count) {
+			case 1:
+				for(int i = 0;i < axis_sum;i++) {
+                	EC_WRITE_U8(slave_vector[slave_num[i]].mode_of_operation, 8);
+				}
+                break;
+            case 200:
+			    for(int i = 0;i < axis_sum;i++) {
+					EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x80);    //错误复位  
+					printf("set control %d: 0x80 \n", i);
+				}
+                break;
+            case 300:
+				for(int i = 0;i < axis_sum;i++) {
+					int32_t curpos = EC_READ_S32(slave_vector[slave_num[i]].target_position);  
+					EC_WRITE_S32(slave_vector[slave_num[i]].control_word, curpos);
+				}
+                break;
+            case 400:
+				for(int i = 0;i < axis_sum;i++)
+				{
+					EC_WRITE_U16(slave_vector[i].control_word, 0x06 );
+					printf("set control %d: 0x06 \n", i);
+				}
+                break;
+            case 500:
+				for(int i=0; i < axis_sum;i++)
+				{
+					EC_WRITE_U16(slave_vector[i].control_word, 0x07 );
+					printf("set control %d: 0x07 \n", i);
+				}
+                break;
+            case 600:
+				for(int i=0;i < axis_sum;i++)
+				{
+					EC_WRITE_U16(slave_vector[i].control_word, 0x0f );
+					printf("set control %d: 0x0f \n", i);
+				}
+                break; 
 			}
-			if(i==2 && (temp_pos[2]<-70 || temp_pos[2]> 70))
-			{
-				return;
-			}
-			if(i==3 && (temp_pos[3]<-70 || temp_pos[2]> 70))
-			{
-				return;
-			}
-			if(i==4 && (temp_pos[4]<-70 || temp_pos[4]> 70))
-			{
-				return;
-			}
-
-			angle_deque.pop_front();
-			set_target_position(i, temp_pos[i]);
 		}
+		else {
+			printf("power on!");
+			poweronstatus = true;
+			gSysRunning.op_count = 0;
+		}
+		break;
+	
+	default:
+		if(!angle_deque.empty() && poweronstatus) {
+			double temp_pos[axis_sum];
+			for(int i=0;i<axis_sum;i++) {
+				temp_pos[i] = angle_deque.front();
+				//2024.4.11增加各轴限位
+				if(i==1 && (temp_pos[1]<-70 || temp_pos[1]> 70)) {
+					return;
+				}
+				if(i==2 && (temp_pos[2]<-70 || temp_pos[2]> 70)) {
+					return;
+				}
+				if(i==3 && (temp_pos[3]<-70 || temp_pos[2]> 70)) {
+					return;
+				}
+				if(i==4 && (temp_pos[4]<-70 || temp_pos[4]> 70)) {
+					return;
+				}
+
+				angle_deque.pop_front();
+				set_target_position(i, temp_pos[i]);
+			}
+		}
+		break;
 	}
+
+
 }
