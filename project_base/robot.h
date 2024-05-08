@@ -81,15 +81,15 @@ public:
 	* @brief 获取实际位置角度值
 	*/
 	double get_actual_position(int axis);
+
+	int32_t get_actual_position_int(int axis);
+
+	void test_demo(void);
+
 	/**
 	* @brief 设置目标位置
 	*/
 	void set_target_position(int axis,double targetPosition);
-
-	/**
-	* @brief 目标位置驱动demo
-	*/
-	void set_target_position_demo(int32_t targetPosition);
 
 	/**
 	* @brief 获取机器人上电状态

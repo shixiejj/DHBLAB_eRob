@@ -8,6 +8,8 @@
 #include "../slave/slave.h"
 using namespace std;
 
+#define     ETHERCAT_STATUS_OP                0x08
+
 extern std::vector<Slave> slave_vector;
 
 Robot::Robot()
@@ -22,7 +24,7 @@ Robot::Robot()
 }
 void Robot::set_DH_param(DH_param param_set)
 {
-	for(int i = 0;i < 6;i++)
+	for(int i = 0;i < Number;i++)
 	{
 		dh.alpha[i] = param_set.alpha[i];
 		dh.d[i] = param_set.d[i];
@@ -72,13 +74,15 @@ void Robot::incToAngle(signed int inc,double& angle,int i)
 {
 	if(i >= axis_sum)
 		return;
-	angle = ( ( ((double)inc) * 360 / (1 << encoder_param.encoderResolution[i]) - encoder_param.singleTurnEncoder[i]) / encoder_param.reducRatio[i] / encoder_param.direction[i]);
+	//angle = ( ( ((double)inc) * 360 / (1 << encoder_param.encoderResolution[i]) - encoder_param.singleTurnEncoder[i]) / encoder_param.reducRatio[i] / encoder_param.direction[i]);
+	angle = (double)(((inc - encoder_param.singleTurnEncoder[i]) % encoder_param.encoderResolution[i]) / (encoder_param.direction[i] * (encoder_param.encoderResolution[i] / 360.0)));
 }
 void Robot::angleToInc(double angle,signed int& inc,int i)
 {
 	if(i >= axis_sum)
 		return;
-	inc = (angle * encoder_param.direction[i] * encoder_param.reducRatio[i] + encoder_param.singleTurnEncoder[i] + encoder_param.deviation[i]) * (1 << encoder_param.encoderResolution[i]) / 360.0;
+	//inc = (angle * encoder_param.direction[i] * encoder_param.reducRatio[i] + encoder_param.singleTurnEncoder[i] + encoder_param.deviation[i]) * (1 << encoder_param.encoderResolution[i]) / 360.0;
+	inc = ((int)(angle * encoder_param.direction[i] * (encoder_param.encoderResolution[i] / 360.0)) + encoder_param.singleTurnEncoder[i]) % encoder_param.encoderResolution[i];
 }
 void Robot::set_angle_deque(std::deque<double>& deque)
 {
@@ -94,103 +98,37 @@ unsigned int Robot::get_angle_deque_size()
 }
 void Robot::power_on()
 {
-	// for (unsigned int  i=0; i < axis_sum; i++)
-	// {
-	// 	//*(slave_vector[slave_num[i]].control_word) = 0;
-	// 	EC_WRITE_U16(slave_vector[i].control_word, 0 );
-	// 	printf("set control %d: 0 \n", i);
-	// }
-	sleep(2);
-	for (unsigned int  i=0; i < axis_sum; i++)
-	{
-		//*(slave_vector[slave_num[i]].control_word) = 0x80;
-		EC_WRITE_U16(slave_vector[i].control_word, 0x80 );
-		printf("set control %d: 0x80 \n", i);
-	}
-    sleep(2);
-    int32_t actual_pos[axis_sum];
-    for(unsigned int i = 0; i < axis_sum; i++)
-    {
-    	//actual_pos[i] = *(slave_vector[slave_num[i]].actual_position);
-		actual_pos[i] = EC_READ_S32(slave_vector[i].actual_position);
-		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] ); 
-    }
-	sleep(2);
-    for(int i = 0;i < axis_sum;i++)
-    {
-		//*(slave_vector[slave_num[i]].control_word) = 6;
-		EC_WRITE_U16(slave_vector[i].control_word, 0x06 );
-		printf("set control %d: 0x06 \n", i);
-		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] ); 
-    }
-    sleep(2);
-
-    for(int i=0;i<axis_sum;i++)
-    {
-		//*(slave_vector[slave_num[i]].control_word) = 7;
-		EC_WRITE_U16(slave_vector[i].control_word, 0x07 );
-		printf("set control %d: 0x07 \n", i);
-		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] );
-    }
-    sleep(2);
-
-    for(int i=0;i<axis_sum;i++)
-    {
-		//*(slave_vector[slave_num[i]].control_word) = 15;
-		EC_WRITE_U16(slave_vector[i].control_word, 0x0f );
-		printf("set control %d: 0x0f \n", i);
-		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		//EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] );
-    }
-	sleep(2);
-	for(unsigned int i = 0; i < axis_sum; i++)
-    {
-		EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] ); 
-    }
-    poweronstatus = true;
-	return;
+	gSysRunning.m_gWorkStatus = SYS_WORKING_OP_MODE;
+	printf("  SYS_WORKING_OP_MODE\n");
 }
 void Robot::power_off()
 {
-    int32_t actual_pos[axis_sum];
-
-    for(unsigned int i = 0; i < axis_sum; i++)
-    {
-    	//actual_pos[i] = *(slave_vector[slave_num[i]].actual_position);
-		actual_pos[i] = EC_READ_S32(slave_vector[slave_num[i]].actual_position);
-    }
-
-    for(int i = 0;i < axis_sum;i++)
-    {
-		//*(slave_vector[slave_num[i]].control_word) = 7;
-		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x07 );
-		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] ); 
-    }
-	sleep(1);
-
-	for(int i=0;i<axis_sum;i++)
-	{
-		//*(slave_vector[slave_num[i]].control_word) = 6;
-		EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x06 );
-		//*(slave_vector[slave_num[i]].target_position) = actual_pos[i];
-		EC_WRITE_S32(slave_vector[slave_num[i]].target_position, actual_pos[i] );
-    }
-	poweronstatus = false;
-	return;
+    gSysRunning.m_gWorkStatus = SYS_WORKING_LINK_DOWN;
+	printf("  SYS_WORKING_LINK_DOWN\n");
+}
+void Robot::test_demo(void) 
+{
+	gSysRunning.m_gWorkStatus = SYS_WORKING_TEST_MODE;
 }
 double Robot::get_actual_position(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;
 	//EC_T_SDWORD actual_pos = *(slave_vector[slave_num[axis]].actual_position);
-	int32_t actual_pos = EC_READ_S32(slave_vector[slave_num[axis]].actual_position);
+	int32_t actual_pos = EC_READ_S32(slave_vector[axis].actual_position);
 	double angle = 0;
 	incToAngle(actual_pos, angle, axis);
 	return angle;
+}
+int32_t Robot::get_actual_position_int(int axis)
+{
+	if(axis >= axis_sum)
+		return -1;
+	//EC_T_SDWORD actual_pos = *(slave_vector[slave_num[axis]].actual_position);
+	int32_t actual_pos = EC_READ_S32(slave_vector[axis].actual_position);
+	//double angle = 0;
+	//incToAngle(actual_pos, angle, axis);
+	return actual_pos;
 }
 void Robot::set_target_position(int axis, double targetPosition)
 {
@@ -198,14 +136,8 @@ void Robot::set_target_position(int axis, double targetPosition)
 		return;
 	int32_t target_pos_inc;
 	angleToInc(targetPosition, target_pos_inc, axis);
-	EC_WRITE_S32(slave_vector[slave_num[axis]].target_position, target_pos_inc);
+	EC_WRITE_S32(slave_vector[axis].target_position, target_pos_inc);
 	//(*slave_vector[slave_num[axis]].target_position) = target_pos_inc;
-}
-void Robot::set_target_position_demo(int32_t targetPosition)
-{
-	for(int i=0; i<axis_sum; i++) {
-		EC_WRITE_S32(slave_vector[i].target_position, targetPosition);
-	}
 }
 bool Robot::get_power_on_status()
 {
@@ -215,7 +147,6 @@ int16_t Robot::get_actual_torque(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;
-	//int16_t actual_torq = *(slave_vector[slave_num[axis]].actual_torque);
 	int16_t actual_torq = EC_READ_S16(slave_vector[slave_num[axis]].actual_torque);
 	return actual_torq;
 }
@@ -223,7 +154,6 @@ uint16_t Robot::get_status_word(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;
-	//EC_T_WORD status_word = *(slave_vector[slave_num[axis]].status_word);
 	uint16_t status_word = EC_READ_U16(slave_vector[axis].status_word);
 	return status_word;
 }
@@ -231,7 +161,6 @@ int Robot::get_actual_velocity(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;
-	//EC_T_SDWORD actual_vel = *(slave_vector[slave_num[axis]].actual_velocity);
 	int32_t actual_vel = EC_READ_S32(slave_vector[slave_num[axis]].actual_velocity);
 
 	return actual_vel;
@@ -240,7 +169,6 @@ void Robot::set_target_torque(int axis,int targetTorque)
 {
 	if(axis >= axis_sum)
 		return;
-	//(*slave_vector[slave_num[axis]].target_torq) = targetTorque;
 	EC_WRITE_S16(slave_vector[slave_num[axis]].target_torq, targetTorque);
 }
 void Robot::move_joint_interp(const VectorXd &targetPoint,
@@ -263,7 +191,7 @@ void Robot::move_line_interp(const VectorXd &targetPoint,
 }
 
 /**		2024-5-3		
- *		Author: liuchongyang
+ *		Author: Szigit
  *		@brief 机器人运行循环函数
  * 		通信周期1ms，每一次通信周期运行一次
  */
@@ -271,6 +199,27 @@ void Robot::cycle_run()
 {
 	switch (gSysRunning.m_gWorkStatus) {
 	case SYS_WORKING_SAFE_MODE:
+		//检查主站是否处于 OP 模式, 若不是，则调整为 OP 模式
+        check_master_state();
+        check_slave_config_states();
+        if((master_state.al_states & ETHERCAT_STATUS_OP))
+        {
+            int tmp = true;
+
+			for(int i = 0;i < axis_sum;i++) {
+				if(sc_state[i].al_state != ETHERCAT_STATUS_OP) {
+					tmp = false;
+					break ;
+				}
+			}
+
+            if(tmp)
+            {
+                gSysRunning.op_count = 0;
+                gSysRunning.m_gWorkStatus = SYS_WORKING_OP_MODE;
+                printf("  SYS_WORKING_OP_MODE\n");
+            }
+        }
 		break;
 
 	case SYS_WORKING_OP_MODE:
@@ -279,19 +228,19 @@ void Robot::cycle_run()
 			switch (gSysRunning.op_count) {
 			case 1:
 				for(int i = 0;i < axis_sum;i++) {
-                	EC_WRITE_U8(slave_vector[slave_num[i]].mode_of_operation, 8);
+                	EC_WRITE_U8(slave_vector[i].mode_of_operation, 8);
 				}
                 break;
             case 200:
 			    for(int i = 0;i < axis_sum;i++) {
-					EC_WRITE_U16(slave_vector[slave_num[i]].control_word, 0x80);    //错误复位  
+					EC_WRITE_U16(slave_vector[i].control_word, 0x80);    //错误复位  
 					printf("set control %d: 0x80 \n", i);
 				}
                 break;
             case 300:
 				for(int i = 0;i < axis_sum;i++) {
-					int32_t curpos = EC_READ_S32(slave_vector[slave_num[i]].target_position);  
-					EC_WRITE_S32(slave_vector[slave_num[i]].control_word, curpos);
+					int32_t curpos = EC_READ_S32(slave_vector[i].actual_position);  
+					EC_WRITE_S32(slave_vector[i].target_position, curpos);
 				}
                 break;
             case 400:
@@ -321,6 +270,54 @@ void Robot::cycle_run()
 			printf("power on!");
 			poweronstatus = true;
 			gSysRunning.op_count = 0;
+			gSysRunning.m_gWorkStatus = SYS_WORKING_IDLE_STATUS;
+		}
+		break;
+	
+	case SYS_WORKING_LINK_DOWN:
+		gSysRunning.op_count++;
+		int32_t actual_pos[Number];
+		if(gSysRunning.op_count <= 900 && !poweronstatus) {
+			switch (gSysRunning.op_count) {
+			case 1:
+				for(unsigned int i = 0; i < axis_sum; i++)
+				{
+					actual_pos[i] = EC_READ_S32(slave_vector[i].actual_position);
+				}
+                break;
+            case 200:
+				for(int i = 0;i < axis_sum;i++)
+				{
+					EC_WRITE_U16(slave_vector[i].control_word, 0x07 );
+					EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] ); 
+				}
+                break;
+            case 400:
+				for(int i=0;i<axis_sum;i++)
+				{
+					EC_WRITE_U16(slave_vector[i].control_word, 0x06 );
+					EC_WRITE_S32(slave_vector[i].target_position, actual_pos[i] );
+				}
+                break;
+			}
+		}
+		else {
+			printf("power off!");
+			poweronstatus = false;
+			gSysRunning.op_count = 0;
+		}
+		break;
+
+	case SYS_WORKING_TEST_MODE:
+		gSysRunning.demo_count++;
+		if(gSysRunning.demo_count <= 500 && poweronstatus) {
+			int32_t curpos = EC_READ_S32(slave_vector[1].actual_position);
+			EC_WRITE_S32(slave_vector[1].target_position, curpos + 10 );
+		}
+		else {
+			printf("finish test turning!");
+			gSysRunning.m_gWorkStatus = SYS_WORKING_IDLE_STATUS;
+			gSysRunning.demo_count = 0;
 		}
 		break;
 	
@@ -333,16 +330,6 @@ void Robot::cycle_run()
 				if(i==1 && (temp_pos[1]<-70 || temp_pos[1]> 70)) {
 					return;
 				}
-				if(i==2 && (temp_pos[2]<-70 || temp_pos[2]> 70)) {
-					return;
-				}
-				if(i==3 && (temp_pos[3]<-70 || temp_pos[2]> 70)) {
-					return;
-				}
-				if(i==4 && (temp_pos[4]<-70 || temp_pos[4]> 70)) {
-					return;
-				}
-
 				angle_deque.pop_front();
 				set_target_position(i, temp_pos[i]);
 			}

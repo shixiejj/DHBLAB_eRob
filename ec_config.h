@@ -20,9 +20,9 @@
 // Application parameters
 #define FREQUENCY 1000
 #define CLOCK_TO_USE CLOCK_MONOTONIC
-#define MEASURE_TIMING
+//#define MEASURE_TIMING
 #define CYCLIC_POSITION            8   /*Operation mode for 0x6060:0*/       /*csp模式*/      //位置模式
-#define Number 2
+#define Number 3
 #define MAX_PDO_ENTRIES            12+1 //最大支持的PDO参数映射
 
 #define VID_PID 0x5a65726f, 0x00029252
@@ -39,6 +39,14 @@
 
 /****************************************************************************/
 extern uint8_t *domain1_pd;
+extern ec_master_t *master;
+extern ec_master_state_t master_state;
+extern ec_domain_t *domain1;
+extern ec_domain_state_t domain1_state;
+extern ec_pdo_entry_reg_t domain1_regs[];
+
+extern ec_slave_config_t *sc_arr[];
+extern ec_slave_config_state_t sc_state[];
 
 typedef struct{
     unsigned int ctrl_word;

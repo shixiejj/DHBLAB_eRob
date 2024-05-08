@@ -2,19 +2,19 @@
 
 offset_t erob_offset[Number];
 // EtherCAT
-static ec_master_t *master = NULL;
-static ec_master_state_t master_state = {};
-static ec_domain_t *domain1 = NULL;
-static ec_domain_state_t domain1_state = {};
+ec_master_t *master = NULL;
+ec_master_state_t master_state = {};
+ec_domain_t *domain1 = NULL;
+ec_domain_state_t domain1_state = {};
 
-static ec_pdo_entry_reg_t domain1_regs[14*Number+1];
+ec_pdo_entry_reg_t domain1_regs[14*Number+1];
 
 // process data
 uint8_t *domain1_pd = NULL;
 
 /****************111111111111***********************/
-static ec_slave_config_t *sc_arr[Number];    //根据从站的个数定
-static ec_slave_config_state_t sc_state[Number];
+ec_slave_config_t *sc_arr[Number];    //根据从站的个数定
+ec_slave_config_state_t sc_state[Number];
 
 static unsigned int counter = 0;
 static unsigned int blink = 0;

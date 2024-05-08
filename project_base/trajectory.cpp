@@ -7,14 +7,15 @@
 
 #include "trajectory.h"
 #include "calculate_method.h"
+#include "../ec_config.h"
 
 void Trajectory::move_joint_interp(const VectorXd &targetPoint,
 		const VectorXd &originPoint, const VectorXd &velCurrent, const VectorXd &accCurrent, double Ts, double velPerc,
 		double accPerc, double decPerc, double jerkPerc , std::deque<double> &deque) //输入的是角度值
 {
-	int n = 6;
+	int n = Number;
 	VectorXd posacs(n);
-	int mcsDimension = 6;
+	int mcsDimension = Number;
 	VectorXd posmcs(mcsDimension);	//正解求直角坐标位置
 
 	//	若有位置命令未执行完毕，等待各轴进入空闲状态
@@ -222,6 +223,8 @@ void Trajectory::move_joint_interp(const VectorXd &targetPoint,
 		}
 	return;
 }
+
+
 void Trajectory::move_line_interp(const VectorXd &targetPoint,
 		const VectorXd &originPoint, const VectorXd &originACS, double velCurrent, double accCurrent,
 		double Ts, double maxVelper, double maxAccper, double maxDecelper,

@@ -12,6 +12,7 @@ typedef enum  _SysWorkingStatus
     SYS_WORKING_POWER_ON,
     SYS_WORKING_SAFE_MODE,
     SYS_WORKING_OP_MODE,
+	SYS_WORKING_TEST_MODE,
     SYS_WORKING_LINK_DOWN,
     SYS_WORKING_IDLE_STATUS       //系统空闲
 }SysWorkingStatus;
@@ -20,6 +21,7 @@ typedef  struct  _GSysRunningParm
 {
     SysWorkingStatus   m_gWorkStatus;
 	int op_count;
+	int demo_count;
 }GSysRunningParm;
 
 
@@ -68,7 +70,7 @@ struct Encoder_Param
 	int direction[6];///运动方向
 	double reducRatio[6];///减速比
 	int encoderResolution[6];///编码器分辨率
-	double singleTurnEncoder[6];///编码器记录值
+	int singleTurnEncoder[6];///编码器记录值
 	double deviation[6];///相对主轴位置偏差
 	Encoder_Param()
 	{
