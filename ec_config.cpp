@@ -7,7 +7,7 @@ ec_master_state_t master_state = {};
 ec_domain_t *domain1 = NULL;
 ec_domain_state_t domain1_state = {};
 
-ec_pdo_entry_reg_t domain1_regs[14*Number+1];
+ec_pdo_entry_reg_t domain1_regs[15*Number+1];
 
 // process data
 uint8_t *domain1_pd = NULL;
@@ -40,12 +40,12 @@ ec_pdo_entry_info_t slave_0_pdo_entries[] = {
     {0x6077, 0x00, 16}, /* Torque Actual Value */
     {0x6061, 0x00, 8}, /* Modes of Operation Display*/
     {0x6060, 0x00, 8}, /* Modes of Operation */
-    //{0x6078, 0x00, 16},  /*actual current*/
+    {0x6078, 0x00, 16},  /*actual current*/
 };
 
 ec_pdo_info_t slave_0_pdos[] = {                 
     {0x1600, 7, slave_0_pdo_entries + 0},
-    {0x1a00, 7, slave_0_pdo_entries + 7},
+    {0x1a00, 8, slave_0_pdo_entries + 7},
 };    //其中第二行的参数需要根据上面的txpdo与rxpdo的个数进行修改
 
 ec_sync_info_t slave_0_syncs[] = {
@@ -286,7 +286,7 @@ int config_ec(void)
     for (int i = 0; i < Number; i++)
     {
         printf("*PDO regs config*:%d\n",i);
-        for (int j = 0; j < 14; j++)
+        for (int j = 0; j < 15; j++)
         {
             domain1_regs[p].alias = 0;
             domain1_regs[p].position = i;
@@ -325,13 +325,13 @@ int config_ec(void)
     }
     /* Set priority */
 
-    struct sched_param param = {};
-    param.sched_priority = 98;
+    // struct sched_param param = {};
+    // param.sched_priority = 98;
 
-    printf("Using priority %i.\n", param.sched_priority);
-    if (sched_setscheduler(0, SCHED_FIFO, &param) == -1)
-    {
-        perror("sched_setscheduler failed");
-    }
+    // printf("Using priority %i.\n", param.sched_priority);
+    // if (sched_setscheduler(0, SCHED_FIFO, &param) == -1)
+    // {
+    //     perror("sched_setscheduler failed");
+    // }
     return 0;
 }

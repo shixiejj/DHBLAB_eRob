@@ -38,7 +38,11 @@ void UR::calc_forward_kin(const VectorXd& posACS,MatrixXd& transMatrix)
 void UR::calc_inverse_kin(const MatrixXd& transMatrix, const VectorXd& posLast, VectorXd& posACS)
 {
 	/*       2023.7.25以能量和最小原则寻找最优解           */
-    int n=Number;
+
+    int n=3;
+	VectorXd pos0(n);
+	pos0<<0,M_PI/2,-M_PI/2;      //零位角度
+
 	double d1{}, d2{}, d5{}, d6{}, a2{}, a3{};
     posACS=posLast;
 
@@ -50,10 +54,10 @@ void UR::calc_inverse_kin(const MatrixXd& transMatrix, const VectorXd& posLast, 
 	MatrixXd T(transMatrix);    //T是末端位姿矩阵
 
 
-	Eigen::MatrixXd Result(n, 2);
+	Eigen::MatrixXd Result(n, 1);
 	for (int i = 0; i < n; i++)
 	{
-		for (int j = 0; j < 2; j++)
+		for (int j = 0; j < 1; j++)
 		{
 			Result(i, j) = 100;
 		}
@@ -61,14 +65,12 @@ void UR::calc_inverse_kin(const MatrixXd& transMatrix, const VectorXd& posLast, 
 	
 	/*		2021-11-26新增		*/
 	VectorXd pLast(n); //读到的角度，经下面处理后，成为theta值
-	for (int i = 0; i < n; i++)
-		pLast(i) = deg2rad(posLast(i));
+	pLast = deg2rad(posLast);
 	/*		2021-11-26新增结束		*/
 
 	/*		  2023.7.24新增	      	*/
 	//计算时加上偏移量（弧度）
-	pLast(1) = pLast(1) + 1.57;
-	pLast(2) = pLast(2) + (-1.57);
+	pLast=pLast+pos0;
 
 	/*		2023.7.24新增结束		*/
 
@@ -78,98 +80,40 @@ void UR::calc_inverse_kin(const MatrixXd& transMatrix, const VectorXd& posLast, 
 	double px(T(0, 3)), py(T(1, 3)), pz(T(2, 3));
 
 	//solve for theta1
-	double theta11, theta12;
-	double A = ax;
-	double B = -ay;
-	double C = 1;
-	double D = pow(A, 2) + pow(B, 2) - pow(C, 2);
-	if(fabs(D)<0.00001) D=0;
-	
-	if (D >= 0.0L)
-	{
-		if ((fabs(A) < 10e-13) && (fabs(B) < 10e-13))
-		{
-			theta11 = pLast(0);
-			theta12 = theta11;
-		}
-		else
-		{
-			theta11 = atan2(C, sqrt(D)) - atan2(B, A);
-			theta12 = atan2(C, -sqrt(D)) - atan2(B, A);
-			if (theta11 > 3.14)
-			{
-				theta11 = theta11 - 2 * M_PI;
-			}
-			else if (theta11 < -3.14)
-			{
-				theta11 = theta11 + 2 * M_PI;
-			}
-
-			if (theta12 > 3.14)
-			{
-				theta12 = theta12 - 2 * M_PI;
-			}
-			else if (theta12 < -3.14)
-			{
-				theta12 = theta12 + 2 * M_PI;
-			}
-		}
-
-		Result(0, 0) = theta11;
-		Result(0, 1) = theta12;
-
-	}
+	double theta1 = atan2(ax,-ay);
+	Result(0, 0) = theta1;
 
 	//solve for theta2
-    double sin2_1=(pz-d1)/a2;
-    double cos2_1=(px*cos(theta11)+py*sin(theta11))/a2;
-    double theta21=atan2(sin2_1,cos2_1);
+    double sin2=(pz-d1)/a2;
+    double cos2=(px*cos(theta1)+py*sin(theta1))/a2;
+    double theta2=atan2(sin2,cos2);
 
-    double sin2_2=(pz-d1)/a2;
-    double cos2_2=(px*cos(theta12)+py*sin(theta12))/a2;
-    double theta22=atan2(sin2_2,cos2_2);
+    Result(1, 0) = theta2;
 
-    Result(1, 0) = theta21;
-    Result(1, 1) = theta22;
 
     //solve for theta3
     double sin23=nz;
     double cos23=oz;
-    double theta31=atan2(sin23,cos23)-theta21;
-    double theta32=atan2(sin23,cos23)-theta22; 
+    double theta3=atan2(sin23,cos23)-theta2;
 
-    if (theta31 > 3.14)
+    if (theta3 > 3.14)
     {
-        theta31 = theta31 - 2 * M_PI;
+        theta3 = theta3 - 2 * M_PI;
     }
-    else if (theta31 < -3.14)
+    else if (theta3 < -3.14)
     {
-        theta31 = theta31 + 2 * M_PI;
+        theta3 = theta3 + 2 * M_PI;
     }
-
-    if (theta32 > 3.14)
-    {
-        theta32 = theta32 - 2 * M_PI;
-    }
-    else if (theta32 < -3.14)
-    {
-        theta32 = theta32 + 2 * M_PI;
-    }
-
-    Result(2, 0) = theta31;
-    Result(2, 1) = theta32;
+    Result(2, 0) = theta3;
 
 	//求2组解的角度变化和，寻找最优解
 	//元素取正
-	Eigen::MatrixXd Result_abs(n, 2);
-	Eigen::VectorXd pos_0(2);  
-	//pos_0 << 0, M_PI / 2, -M_PI / 2, M_PI / 2, M_PI / 2, 0;      //机械臂初始偏置
-	pos_0 = pLast;
+	Eigen::MatrixXd Result_abs(n, 1);
 	for (int i = 0; i < n; i++)
 	{
-		for (int j = 0; j < 2; j++)
+		for (int j = 0; j < 1; j++)
 		{
-			Result_abs(i, j) = pow((Result(i, j) - pos_0(i)),2);
+			Result_abs(i, j) = pow((Result(i, j) - pLast(i)),2);
 		}
 	}
 	//解矩阵按列求和
@@ -178,22 +122,22 @@ void UR::calc_inverse_kin(const MatrixXd& transMatrix, const VectorXd& posLast, 
 	Eigen::MatrixXd::Index minIndex;
 	double min_h = histogram1.minCoeff(&minIndex);
 
-    VectorXd tempPos=pLast;
+    VectorXd tempPos=pLast;    //弧度
 	//输出能量和最小的一组最优解
 	for (int i = 0; i < n; i++)
 	{
-		tempPos[i] = rad2deg(Result(i, minIndex));   
-		if (fabs(tempPos[i]) > 180)
+		tempPos[i] = Result(i, minIndex);   
+		if (fabs(tempPos[i]) > M_PI)
 		{
             cout<<"  Error  "<<endl;
 			return;
 		}
 	}
 
-    posACS=tempPos;
-	//输出时减去偏移量（角度）
-	posACS(1) = posACS(1) - 90;
-	posACS(2) = posACS(2) - (-90);
+	//输出时减去偏移量,再转换为角度
+    posACS=tempPos-pos0;
+	posACS = rad2deg(posACS);
+
 }
 
 void UR::move_line_interp(const VectorXd &targetPoint,

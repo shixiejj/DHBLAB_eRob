@@ -313,136 +313,6 @@ void line_move_UR()
 }
 
 
-//自己写直线程序
-void cartesian_space_linear_move()
-{
-	if (not robot_is_moving)
-    {
-        // 机器人同时只可执行一次动作
-        robot_is_moving = true;
-    }
-    else
-    {
-        return;
-    }
-
-	double pos_cur_ang[6];  ///当前位置角度值,角度制
-	VectorXd pos_acs(6);
-
-	for(int i=0;i<6;i++)
-	{
-		pos_cur_ang[i] = g_UR->get_actual_position(i);  ///获取当前位置角度值
-	}
-	for(int i=0;i<6;i++)
-	{
-		pos_acs(i) = pos_cur_ang[i];
-	}
-	MatrixXd trans_matrix_line_test;
-    VectorXd XYZ_position(3);
-	g_UR->calc_forward_kin(pos_acs,trans_matrix_line_test);  ///计算当前位置的正解矩阵
-
-	VectorXd origin_point_line_test = tr_2_MCS(trans_matrix_line_test);  ///计算当前位置的直角坐标
-    origin_point_line_test(3)=1.57;
-    origin_point_line_test(4)=0;
-    origin_point_line_test(5)=3.14;
-	cout<<"origin_point_line_test:"<<origin_point_line_test<<endl;
-
-	VectorXd target_point_line_test = origin_point_line_test;
-
-	//指定xyzRYZ   （400，0，500，3.14，0，0）
-    target_point_line_test(0)=580;
-    target_point_line_test(1)=0;
-    target_point_line_test(2)=300;
-
-	cout<<"target_point_line_test:"<<target_point_line_test<<endl;
-
-
-	double max_step=0.01;    //最大插补步长
-	VectorXd delta(6);        //相邻两点位置变化 
-	VectorXd Inter_points(6);    //各位置插补点数
-	int maxInter=0;            //最大插补点数
-	VectorXd temp_xyzRPY=origin_point_line_test;     // 用于暂存插补点位置
-    VectorXd point_pos(6);                           //存储逆解结果
-    VectorXd pLast=pos_acs;
-	deque<double> trajectory_line_test;              //总的各轴运动轨迹
-    
-	for(int i=0;i<6;i++)
-	{
-		delta(i)=target_point_line_test(i)-origin_point_line_test(i);
-		Inter_points(i)=floor(delta(i)/max_step);
-		
-		if(abs(Inter_points(i))>maxInter)
-		{
-			maxInter=abs(Inter_points(i));           //最大插补点数
-		}
-	}
-
-	cout<<"maxInter："<<maxInter<<endl;
-
-	//生成链表
-	for(int step=0;step<=maxInter;step++)
-	{
-		for(int i=0;i<6;i++)
-		{
-			temp_xyzRPY(i) =  origin_point_line_test(i)+step*delta(i)/maxInter;
-		}
-        g_UR->calc_inverse_kin(g_UR->rpy_2_tr(temp_xyzRPY),pLast,point_pos);
-        pLast=point_pos;
-		for (int ai=0; ai!=6; ++ai) /*1-n轴*/
-		{
-            trajectory_line_test.push_back(point_pos[ai]);
-		}
-	}   
-
-
-	VectorXd pos_cur(6);
-	double cur_angle_double[6];
-	VectorXd mcs_cur;
-	if(!g_UR->get_power_on_status())
-		g_UR->power_on();
-	sleep(2);
-	///插补轨迹写入运动队列
-
-	cout<<"开始运动"<<endl;
-
-	g_UR->set_angle_deque(trajectory_line_test);
-
-
-	while(g_UR->get_power_on_status())
-	{
-		for(int i=0;i<6;i++)
-		{
-			cur_angle_double[i] = g_UR->get_actual_position(i);  ///获取当前位置角度值
-		}
-		for(int i=0;i<6;i++)
-		{
-			pos_cur[i] = cur_angle_double[i];
-		}
-		g_UR->calc_forward_kin(pos_cur,trans_matrix_line_test);
-		mcs_cur = tr_2_MCS(trans_matrix_line_test);
-		printf("line_move_test mcs ");
-		for(int i=0;i<3;i++)
-		{
-			printf("%lf ",trans_matrix_line_test(i,3));  ///运动过程中输出实时直角坐标
-		}
-		printf("\n");
-		if(g_UR->get_angle_deque().empty() && g_UR->get_power_on_status())
-			g_UR->power_off();
-		sleep(2);
-	}
-
-    cout << "当前角度 deg:" << endl;
-    for (int i = 0; i < 6; i++)
-    {
-        cout << g_UR->get_actual_position(i) << "  ";
-    }
-	cout << endl;
-
-	robot_is_moving = false;
-
-}
-
-
 void cycle_move_UR()
 {
     //定义一个圆弧
@@ -2038,16 +1908,22 @@ void eRob_position_read() {
     }
 }
 
+void eRob_velocity_read() {
+    for(int i=0; i < Number; i++) {
+        double velocity_temp = g_UR->get_actual_velocity(i);
+        printf("%d轴速度:%f \n", i, velocity_temp);
+    }
+}
+
+void eRob_current_read() {
+    for(int i=0; i < Number; i++) {
+        double current_temp = g_UR->get_actual_current(i);
+        printf("%d轴电流:%f \n", i, current_temp);
+    }
+}
+
 void eRob_demo() {
-    // while(1) {
-    //     for(int i=0; i < Number; i++) {
-    //         uint32_t actual_position = EC_READ_S32(slave_vector[i].actual_position);
-    //         printf("position_actual_value%d : %10u\n", i, actual_position);
-    //         uint32_t target_position = actual_position + 10;
-    //         EC_WRITE_S32(slave_vector[i].target_position, target_position);
-    //     }
-    //     usleep(10000);
-    // }
+
     g_UR->test_demo();
 
 }
@@ -2130,6 +2006,232 @@ void joints_move_test_UR()
 
 }
 
+// **** 机器人笛卡尔空间直线运动规划
+void cartesian_space_linear_move(void)
+{
+	if (!robot_is_moving)
+    {
+        // 机器人同时只可执行一次动作
+        robot_is_moving = true;
+    }
+    else
+    {
+        return;
+    }
+
+	VectorXd pos_acs(Number);
+
+	for(int i=0;i<Number;i++)
+	{
+		pos_acs[i] = g_UR->get_actual_position(i);  ///获取当前位置角度值
+	}
+
+	MatrixXd trans_matrix_line_test;
+
+	g_UR->calc_forward_kin(pos_acs,trans_matrix_line_test);  ///计算当前位置的正解矩阵
+    cout<<"当前角度："<<pos_acs<<endl;
+    cout<<"trans_matrix_line_test："<<trans_matrix_line_test<<endl;
+
+	VectorXd origin_point_line_test = g_UR->tr_2_MCS(trans_matrix_line_test);  ///计算当前位置的直角坐标
+	cout<<"origin_point_line_test:"<<origin_point_line_test<<endl;
+
+	VectorXd target_point_line_test = origin_point_line_test;
+
+	//指定xyzRYZ   （187.5，44，315，-0.6981，0.6981，1.57）
+    target_point_line_test<<132.371, -23.457, 364.186, -0.4363, 0.5236, 1.57;
+
+	cout<<"target_point_line_test:"<<target_point_line_test<<endl;
+
+
+	double max_step=0.002;    //最大插补步长
+	VectorXd delta(6);        //相邻两点位置变化 
+	VectorXd Inter_points(6);    //各位置插补点数
+	int maxInter=0;            //最大插补点数
+	VectorXd temp_xyzRPY=origin_point_line_test;     // 用于暂存插补点位置
+    VectorXd point_pos(Number);                           //存储逆解结果
+    VectorXd pLast=pos_acs;
+	deque<double> trajectory_line_test;              //总的各轴运动轨迹
+    
+	for(int i=0;i<6;i++)
+	{
+		delta(i)=target_point_line_test(i)-origin_point_line_test(i);
+		Inter_points(i)=floor(delta(i)/max_step);
+		
+		if(abs(Inter_points(i))>maxInter)
+		{
+			maxInter=abs(Inter_points(i));           //最大插补点数
+		}
+	}
+
+	cout<<"maxInter："<<maxInter<<endl;
+
+	//生成链表
+	for(int step=0;step<=maxInter;step++)
+	{
+		for(int i=0;i<6;i++)
+		{
+			temp_xyzRPY(i) =  origin_point_line_test(i)+step*delta(i)/maxInter;
+		}
+        g_UR->calc_inverse_kin(g_UR->rpy_2_tr(temp_xyzRPY),pLast,point_pos);
+        pLast=point_pos;
+		for (int ai=0; ai!=Number; ++ai) /*1-n轴*/
+		{
+            trajectory_line_test.push_back(point_pos[ai]);
+		}
+	}   
+
+	if(!g_UR->get_power_on_status())
+		g_UR->power_on();
+	sleep(2);
+	///插补轨迹写入运动队列
+
+    char joint_info_test[255];
+    cout << "是否确定？yes|no" << endl;
+    cin >> joint_info_test;
+    if (0 != strcmp(joint_info_test, "yes"))
+    {
+        cout << "取消转动操作，程序退出";
+        robot_is_moving = false;
+        return;
+    }
+
+	cout<<"开始运动"<<endl;
+
+	g_UR->set_angle_deque(trajectory_line_test);
+
+    while (g_UR->get_power_on_status() && !g_UR->get_angle_deque().empty()) //循环检测使能状态
+    {
+        if (g_UR->get_angle_deque().empty() && g_UR->get_power_on_status())
+        {
+            g_UR->power_off(); //关闭使能
+        }                              //判断运动状态
+        sleep(1);
+    }
+
+    cout << "当前角度 deg:" << endl;
+    for (int i = 0; i < 6; i++)
+    {
+        cout << g_UR->get_actual_position(i) << "  ";
+    }
+	cout << endl;
+
+	robot_is_moving = false;
+
+}
+
+
+void cartesian_space_linear_moveZero(void)
+{
+	if (!robot_is_moving)
+    {
+        // 机器人同时只可执行一次动作
+        robot_is_moving = true;
+    }
+    else
+    {
+        return;
+    }
+
+	VectorXd pos_acs(Number);
+
+	for(int i=0;i<Number;i++)
+	{
+		pos_acs[i] = g_UR->get_actual_position(i);  ///获取当前位置角度值
+	}
+
+	MatrixXd trans_matrix_line_test;
+
+	g_UR->calc_forward_kin(pos_acs,trans_matrix_line_test);  ///计算当前位置的正解矩阵
+    cout<<"当前角度："<<pos_acs<<endl;
+    cout<<"trans_matrix_line_test："<<trans_matrix_line_test<<endl;
+
+	VectorXd origin_point_line_test = g_UR->tr_2_MCS(trans_matrix_line_test);  ///计算当前位置的直角坐标
+	cout<<"origin_point_line_test:"<<origin_point_line_test<<endl;
+
+	VectorXd target_point_line_test = origin_point_line_test;
+
+	//指定xyzRYZ   （187.5，44，315，-0.6981，0.6981，1.57）
+    target_point_line_test<<0, -86.5, 387, 0, 0, 1.57;
+
+	cout<<"target_point_line_test:"<<target_point_line_test<<endl;
+
+
+	double max_step=0.002;    //最大插补步长
+	VectorXd delta(6);        //相邻两点位置变化 
+	VectorXd Inter_points(6);    //各位置插补点数
+	int maxInter=0;            //最大插补点数
+	VectorXd temp_xyzRPY=origin_point_line_test;     // 用于暂存插补点位置
+    VectorXd point_pos(Number);                           //存储逆解结果
+    VectorXd pLast=pos_acs;
+	deque<double> trajectory_line_test;              //总的各轴运动轨迹
+    
+	for(int i=0;i<6;i++)
+	{
+		delta(i)=target_point_line_test(i)-origin_point_line_test(i);
+		Inter_points(i)=floor(delta(i)/max_step);
+		
+		if(abs(Inter_points(i))>maxInter)
+		{
+			maxInter=abs(Inter_points(i));           //最大插补点数
+		}
+	}
+
+	cout<<"maxInter："<<maxInter<<endl;
+
+	//生成链表
+	for(int step=0;step<=maxInter;step++)
+	{
+		for(int i=0;i<6;i++)
+		{
+			temp_xyzRPY(i) =  origin_point_line_test(i)+step*delta(i)/maxInter;
+		}
+        g_UR->calc_inverse_kin(g_UR->rpy_2_tr(temp_xyzRPY),pLast,point_pos);
+        pLast=point_pos;
+		for (int ai=0; ai!=Number; ++ai) /*1-n轴*/
+		{
+            trajectory_line_test.push_back(point_pos[ai]);
+		}
+	}   
+
+	if(!g_UR->get_power_on_status())
+		g_UR->power_on();
+	sleep(2);
+	///插补轨迹写入运动队列
+
+    char joint_info_test[255];
+    cout << "是否确定？yes|no" << endl;
+    cin >> joint_info_test;
+    if (0 != strcmp(joint_info_test, "yes"))
+    {
+        cout << "取消转动操作，程序退出";
+        robot_is_moving = false;
+        return;
+    }
+
+	cout<<"开始运动"<<endl;
+
+	g_UR->set_angle_deque(trajectory_line_test);
+
+    while (g_UR->get_power_on_status() && !g_UR->get_angle_deque().empty()) //循环检测使能状态
+    {
+        if (g_UR->get_angle_deque().empty() && g_UR->get_power_on_status())
+        {
+            g_UR->power_off(); //关闭使能
+        }                              //判断运动状态
+        sleep(1);
+    }
+
+    cout << "当前角度 deg:" << endl;
+    for (int i = 0; i < 6; i++)
+    {
+        cout << g_UR->get_actual_position(i) << "  ";
+    }
+	cout << endl;
+
+	robot_is_moving = false;
+
+}
+
 
 
 void joint_cmd_action()
@@ -2157,7 +2259,7 @@ void joint_cmd_action()
         {"line",line_move_UR},
         {"cycle",cycle_move_UR},
 
-        {"myLine",cartesian_space_linear_move},
+        //{"myLine",cartesian_space_linear_move},
         //测试不插补
         {"read_no",read_txt_no},
         {"points_no",follow_point_move_UR_no},
@@ -2179,8 +2281,12 @@ void joint_cmd_action()
 
         {"read_status",eRob_status_read},
         {"read_position",eRob_position_read},
+        {"read_velocity",eRob_velocity_read},
+        {"read_current",eRob_current_read},
         {"demo",eRob_demo},
         {"joints_test",joints_move_test_UR},
+        {"line_test",cartesian_space_linear_move},
+        {"line_zero",cartesian_space_linear_moveZero},
 
         {"serial_read",serial_read},
         {"serial_start",serial_start}

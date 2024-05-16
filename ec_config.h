@@ -64,6 +64,7 @@ typedef struct{
     unsigned int torque_actual_value;
     unsigned int operation_mode_display;
     unsigned int operation_mode_temp;
+    unsigned int current_actual_value;
 
 }offset_t;
 extern offset_t erob_offset[];

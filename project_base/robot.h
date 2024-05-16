@@ -82,8 +82,6 @@ public:
 	*/
 	double get_actual_position(int axis);
 
-	int32_t get_actual_position_int(int axis);
-
 	void test_demo(void);
 
 	/**
@@ -99,7 +97,7 @@ public:
 	/**
 	* @brief 获取实际转矩
 	*/
-	int16_t get_actual_torque(int axis);
+	double get_actual_torque(int axis);
 
 	/**
 	* @brief 获取状态字
@@ -110,6 +108,12 @@ public:
 	* @brief 获取实际速度,速度单位取决于伺服输出的单位
 	*/
 	int get_actual_velocity(int axis);
+
+	/**
+	* @brief 获取实际电流,电流单位mA
+	*/
+	double get_actual_current(int axis);
+
 	/**
 	* @brief 设置目标转矩
 	*/

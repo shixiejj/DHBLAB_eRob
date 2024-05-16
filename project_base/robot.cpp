@@ -110,6 +110,7 @@ void Robot::test_demo(void)
 {
 	gSysRunning.m_gWorkStatus = SYS_WORKING_TEST_MODE;
 }
+
 double Robot::get_actual_position(int axis)
 {
 	if(axis >= axis_sum)
@@ -120,16 +121,16 @@ double Robot::get_actual_position(int axis)
 	incToAngle(actual_pos, angle, axis);
 	return angle;
 }
-int32_t Robot::get_actual_position_int(int axis)
+
+double Robot::get_actual_current(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;
-	//EC_T_SDWORD actual_pos = *(slave_vector[slave_num[axis]].actual_position);
-	int32_t actual_pos = EC_READ_S32(slave_vector[axis].actual_position);
-	//double angle = 0;
-	//incToAngle(actual_pos, angle, axis);
-	return actual_pos;
+	int16_t actual_current = EC_READ_S16(slave_vector[axis].actual_current);
+	double current = actual_current * 6.9;
+	return current;
 }
+
 void Robot::set_target_position(int axis, double targetPosition)
 {
 	if(axis >= axis_sum)
@@ -143,12 +144,13 @@ bool Robot::get_power_on_status()
 {
 	return poweronstatus;
 }
-int16_t Robot::get_actual_torque(int axis)
+double Robot::get_actual_torque(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;
-	int16_t actual_torq = EC_READ_S16(slave_vector[slave_num[axis]].actual_torque);
-	return actual_torq;
+	int16_t actual_torq = EC_READ_S16(slave_vector[axis].actual_torque);
+	double torq = actual_torq * 6.9;
+	return torq;
 }
 uint16_t Robot::get_status_word(int axis)
 {
@@ -161,7 +163,7 @@ int Robot::get_actual_velocity(int axis)
 {
 	if(axis >= axis_sum)
 		return -1;
-	int32_t actual_vel = EC_READ_S32(slave_vector[slave_num[axis]].actual_velocity);
+	int32_t actual_vel = EC_READ_S32(slave_vector[axis].actual_velocity);
 
 	return actual_vel;
 }

@@ -10,16 +10,6 @@
 
 Slave::Slave(const uint8_t *dom, const offset_t &off)
 {
-	// actual_position = nullptr;
-	// actual_torque = nullptr;
-	// status_word = nullptr;
-	// actual_velocity = nullptr;
-	// error_code = nullptr;
-
-	// control_word = nullptr;
-	// target_position = nullptr;
-	// mode_of_operation = nullptr;
-	// target_torq = nullptr;
 
 /*RxPDO*/
 	control_word = (uint16_t *)(dom + off.ctrl_word);
@@ -52,5 +42,8 @@ Slave::Slave(const uint8_t *dom, const offset_t &off)
 
 	actual_velocity = (int32_t *)(dom + off.velocity_actual_value);
 	printf("actual_velocity addr = %p\n", actual_velocity);
+
+	actual_current = (int16_t *)(dom + off.current_actual_value);
+	printf("actual_current addr = %p\n", actual_current);
 
 }

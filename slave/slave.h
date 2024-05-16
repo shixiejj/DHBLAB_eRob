@@ -30,6 +30,7 @@ public:
 	uint8_t*                   mode_of_operation;   //存储操作模式地址
 	uint8_t*                   mode_of_operation_display;   //存储操作模式显示地址
 	int16_t*                  target_torq;   //存储目标转矩地址
+	int16_t*				actual_current;		//存储实际电流地址
 };
 
 
